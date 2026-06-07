@@ -1,5 +1,11 @@
 import { aggregateLearningStats, createClozeExercise, gradeClozeExercise } from "@bestlng/core";
 import type { AnswerNormalizationOptions, ClozeExercise, PracticeAttempt } from "@bestlng/core";
+import {
+    createExerciseInputsFromPackage,
+    parseContentPackageCsv,
+    parseContentPackageJson,
+} from "@bestlng/content";
+import type { ContentPackage, GeneratedClozeExerciseInput } from "@bestlng/content";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import Database from "@tauri-apps/plugin-sql";
@@ -9,6 +15,7 @@ import type {
     AnswerStrictness,
     BackupImportResult,
     ContentPackView,
+    ContentImportResult,
     LearningWorkspaceState,
     SubmitClozeAnswerInput,
     SubmitClozeAnswerResult,
@@ -251,6 +258,28 @@ function getAnswerOptions(strictness: AnswerStrictness): Partial<AnswerNormaliza
     return {};
 }
 
+function getFileExtension(path: string): string {
+    const extension = path.split(".").pop();
+
+    return extension?.toLowerCase() ?? "";
+}
+
+function getFileBaseName(path: string): string {
+    const normalizedPath = path.replaceAll("\\", "/");
+    const fileName = normalizedPath.split("/").pop() ?? "user-content";
+
+    return fileName.replace(/\.[^.]+$/, "") || "user-content";
+}
+
+function createImportedPackageId(filePath: string): string {
+    const safeName = getFileBaseName(filePath)
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "");
+
+    return `user-${safeName || "content"}-${Date.now()}`;
+}
+
 async function seedDatabase(db: Database): Promise<void> {
     const existingRows = await db.select<CountRow[]>("SELECT COUNT(*) AS count FROM content_packs");
 
@@ -324,6 +353,101 @@ async function seedDatabase(db: Database): Promise<void> {
     }
 
     await saveSettingsToDatabase(db, defaultSettings);
+}
+
+async function insertContentPackage(
+    db: Database,
+    contentPackage: ContentPackage,
+    exercises: readonly GeneratedClozeExerciseInput[],
+): Promise<void> {
+    const manifest = contentPackage.manifest;
+
+    try {
+        // 内容包导入使用事务，避免导入到一半时留下孤立句子或空位。
+        await db.execute("BEGIN IMMEDIATE TRANSACTION");
+        await db.execute(
+            `INSERT INTO content_packs
+                (id, title, description, source, license_name, license_url, is_enabled)
+             VALUES ($1, $2, $3, $4, $5, $6, 1)
+             ON CONFLICT(id) DO UPDATE SET
+                title = excluded.title,
+                description = excluded.description,
+                source = excluded.source,
+                license_name = excluded.license_name,
+                license_url = excluded.license_url,
+                is_enabled = 1`,
+            [
+                manifest.id,
+                manifest.name,
+                manifest.description ?? "",
+                manifest.authors.join(", "),
+                manifest.license?.name ?? "未声明",
+                manifest.license?.url ?? "",
+            ],
+        );
+
+        for (const exercise of exercises) {
+            await db.execute("DELETE FROM sentence_blanks WHERE sentence_id = $1", [exercise.id]);
+            await db.execute(
+                `INSERT INTO sentences
+                    (id, pack_id, source_lang, target_lang, text, translation, level, tags)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                 ON CONFLICT(id) DO UPDATE SET
+                    pack_id = excluded.pack_id,
+                    source_lang = excluded.source_lang,
+                    target_lang = excluded.target_lang,
+                    text = excluded.text,
+                    translation = excluded.translation,
+                    level = excluded.level,
+                    tags = excluded.tags`,
+                [
+                    exercise.id,
+                    exercise.sourcePackageId,
+                    manifest.sourceLanguage,
+                    manifest.targetLanguage,
+                    exercise.sentence,
+                    exercise.translation,
+                    "A1",
+                    JSON.stringify(exercise.tags),
+                ],
+            );
+
+            for (const [blankIndex, blank] of exercise.blanks.entries()) {
+                await db.execute(
+                    `INSERT INTO sentence_blanks
+                        (id, sentence_id, answer, accepted_answers, hint, display_order)
+                     VALUES ($1, $2, $3, $4, $5, $6)`,
+                    [
+                        blank.id,
+                        exercise.id,
+                        blank.answer,
+                        JSON.stringify(blank.acceptedAnswers ?? []),
+                        blank.hint ?? "",
+                        blankIndex,
+                    ],
+                );
+
+                await db.execute(
+                    `INSERT OR IGNORE INTO vocabulary_entries
+                        (id, term, meaning, lang, status, next_review_at)
+                     VALUES ($1, $2, $3, $4, $5, $6)`,
+                    [
+                        `vocab-${blank.id}`,
+                        blank.answer,
+                        blank.hint ?? exercise.translation,
+                        manifest.sourceLanguage,
+                        "learning",
+                        new Date().toISOString(),
+                    ],
+                );
+            }
+        }
+
+        await db.execute("COMMIT");
+    } catch (error) {
+        await db.execute("ROLLBACK");
+        throw error;
+    }
 }
 
 async function saveSettingsToDatabase(db: Database, settings: UserSettings): Promise<void> {
@@ -988,6 +1112,60 @@ export async function importLearningBackup(): Promise<BackupImportResult | null>
 
     return {
         importedAt: new Date().toISOString(),
+        state: await loadFromDatabase(db),
+    };
+}
+
+/**
+ * 从本地 CSV 或 JSON 文件导入内容包。
+ *
+ * JSON 需要符合 BestLNG `ContentPackage` schema；CSV 至少需要
+ * `text,translation,answer` 表头。
+ */
+export async function importContentPackageFile(): Promise<ContentImportResult | null> {
+    const db = await getDatabase();
+
+    if (db === null) {
+        throw new Error("当前处于浏览器预览模式，无法访问桌面端文件系统。");
+    }
+
+    const selectedPath = await open({
+        filters: [
+            {
+                extensions: ["json", "csv"],
+                name: "BestLNG 内容包",
+            },
+        ],
+        multiple: false,
+        title: "导入 BestLNG 内容包",
+    });
+
+    if (selectedPath === null || Array.isArray(selectedPath)) {
+        return null;
+    }
+
+    const fileContent = await readTextFile(selectedPath);
+    const extension = getFileExtension(selectedPath);
+    const contentPackage =
+        extension === "csv"
+            ? parseContentPackageCsv(fileContent, {
+                  author: "BestLNG 用户",
+                  licenseAttribution: "用户确认拥有导入内容的使用权。",
+                  licenseName: "User Provided",
+                  packageDescription: `从 ${getFileBaseName(selectedPath)}.csv 导入的本地内容包。`,
+                  packageId: createImportedPackageId(selectedPath),
+                  packageName: getFileBaseName(selectedPath),
+                  sourceLanguage: "en",
+                  targetLanguage: "zh-CN",
+              })
+            : parseContentPackageJson(fileContent);
+    const exercises = createExerciseInputsFromPackage(contentPackage);
+
+    await insertContentPackage(db, contentPackage, exercises);
+
+    return {
+        importedSentenceCount: exercises.length,
+        packageName: contentPackage.manifest.name,
         state: await loadFromDatabase(db),
     };
 }

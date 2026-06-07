@@ -11,6 +11,7 @@ import { getPageHash, navigationItems, type PageId } from "./app/navigation";
 import { usePageRouter } from "./app/usePageRouter";
 import {
     exportLearningBackup,
+    importContentPackageFile,
     importLearningBackup,
     loadLearningWorkspace,
     saveUserSettings,
@@ -413,7 +414,13 @@ function PageContent({
         case "vocabulary":
             return <VocabularyPanel vocabulary={state.vocabulary} />;
         case "packs":
-            return <PacksPanel state={state} />;
+            return (
+                <PacksPanel
+                    onAnnouncement={onAnnouncement}
+                    onStateChange={onStateChange}
+                    state={state}
+                />
+            );
         case "stats":
             return <StatsPanel state={state} />;
         case "settings":
@@ -759,7 +766,45 @@ function WordRow({ entry }: { entry: VocabularyEntryView }): ReactElement {
     );
 }
 
-function PacksPanel({ state }: { state: LearningWorkspaceState }): ReactElement {
+function PacksPanel({
+    onAnnouncement,
+    onStateChange,
+    state,
+}: {
+    onAnnouncement: (message: string) => void;
+    onStateChange: (state: LearningWorkspaceState) => void;
+    state: LearningWorkspaceState;
+}): ReactElement {
+    const [isImporting, setIsImporting] = useState(false);
+    const [importMessage, setImportMessage] = useState<string | null>(null);
+
+    const handleImport = async (): Promise<void> => {
+        setIsImporting(true);
+        setImportMessage(null);
+
+        try {
+            const result = await importContentPackageFile();
+
+            if (result === null) {
+                setImportMessage("已取消导入。");
+                return;
+            }
+
+            onStateChange(result.state);
+            setImportMessage(
+                `已导入「${result.packageName}」，新增 ${result.importedSentenceCount} 句。`,
+            );
+            onAnnouncement("内容包已导入。");
+        } catch (error) {
+            const message = error instanceof Error ? error.message : "导入内容包失败。";
+
+            setImportMessage(message);
+            onAnnouncement(message);
+        } finally {
+            setIsImporting(false);
+        }
+    };
+
     return (
         <div className="content-grid">
             <section className="panel" aria-labelledby="packs-title">
@@ -795,10 +840,22 @@ function PacksPanel({ state }: { state: LearningWorkspaceState }): ReactElement 
             <aside className="panel import-panel" aria-labelledby="import-title">
                 <p className="section-eyebrow">Import</p>
                 <h2 id="import-title">导入入口</h2>
-                <p>本地 v1 已预留 CSV 和 JSON 导入位置。正式导入前需要记录来源与许可证。</p>
-                <button className="secondary-button" disabled type="button">
-                    选择本地文件
+                <p>支持 JSON 内容包和 CSV 句子表。CSV 表头至少包含 text、translation、answer。</p>
+                <button
+                    className="secondary-button"
+                    disabled={!state.isPersistent || isImporting}
+                    onClick={() => {
+                        void handleImport();
+                    }}
+                    type="button"
+                >
+                    {isImporting ? "导入中" : "选择本地文件"}
                 </button>
+                {importMessage === null ? null : (
+                    <p className="form-note" role="status">
+                        {importMessage}
+                    </p>
+                )}
             </aside>
         </div>
     );

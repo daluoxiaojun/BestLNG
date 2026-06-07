@@ -70,3 +70,9 @@ export interface BackupImportResult {
     readonly importedAt: string;
     readonly state: LearningWorkspaceState;
 }
+
+export interface ContentImportResult {
+    readonly importedSentenceCount: number;
+    readonly packageName: string;
+    readonly state: LearningWorkspaceState;
+}

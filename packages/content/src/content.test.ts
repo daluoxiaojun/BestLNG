@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
     createExerciseInputsFromPackage,
+    parseContentPackageCsv,
+    parseContentPackageJson,
     sampleContentPackage,
     validateContentPackage,
     type ContentPackage,
@@ -65,5 +67,36 @@ describe("内容包转练习输入", () => {
             sourcePackageId: "bestlng-sample-en-zh",
             tags: ["daily", "language"],
         });
+    });
+});
+
+describe("内容包导入", () => {
+    it("从 CSV 生成许可证明确的内容包", () => {
+        const contentPackage = parseContentPackageCsv(
+            [
+                "id,text,translation,answer,hint,accepted_answers,tags",
+                'greeting-1,"I, really like apples.",我真的喜欢苹果,like,喜欢,"love|enjoy","A1|food"',
+            ].join("\n"),
+            {
+                author: "BestLNG 用户",
+                licenseAttribution: "用户自备内容",
+                licenseName: "CC0-1.0",
+                packageId: "user-pack",
+                packageName: "用户导入包",
+                sourceLanguage: "en",
+                targetLanguage: "zh-CN",
+            },
+        );
+
+        expect(contentPackage.sentences[0]?.text).toBe("I, really like apples.");
+        expect(contentPackage.sentences[0]?.blanks[0]?.acceptedAnswers).toEqual(["love", "enjoy"]);
+        expect(validateContentPackage(contentPackage).isValid).toBe(true);
+    });
+
+    it("从 JSON 读取完整内容包并执行校验", () => {
+        const contentPackage = parseContentPackageJson(JSON.stringify(sampleContentPackage));
+
+        expect(contentPackage.manifest.id).toBe(sampleContentPackage.manifest.id);
+        expect(contentPackage.sentences.length).toBeGreaterThan(0);
     });
 });

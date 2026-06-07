@@ -178,6 +178,50 @@ React + TypeScript 桌面端骨架。
 
 下一步建议：继续执行任务清单中的第一个未完成任务，支持 CSV、JSON 等基础格式导入。
 
+## 9. 支持 CSV 与 JSON 内容包导入
+
+本阶段补齐本地自用第一版里非常关键的内容来源能力，让用户可以把自己的句子和词导入到桌面端。
+
+新增或更新的主要内容：
+
+- `packages/content` 新增导入解析器，支持完整 JSON 内容包和带表头 CSV。
+- JSON 导入复用既有 `ContentPackage` schema，并继续执行许可证、作者、句子和挖空字段校验。
+- CSV 导入支持 `text`、`translation`、`answer` 必填字段，以及 `id`、`hint`、
+  `accepted_answers`、`tags` 可选字段；多值字段使用 `|` 分隔。
+- CSV 导入会生成许可证明确的用户内容包，默认标注为 `User Provided`，提醒用户自行确认来源权利。
+- 桌面端内容包页的“选择本地文件”按钮改为真实可用，支持选择 `.csv` 和 `.json` 文件。
+- 导入成功后写入 SQLite 内容包、句子、挖空配置和初始词条，并刷新当前工作台状态。
+- 新增内容包导入测试，将测试数量从 9 条提升到 11 条。
+- 更新 `docs/TASK_PLAN.md`，将“支持 CSV、JSON 等基础格式导入”标记为完成。
+
+主要修改或新增文件：
+
+- `packages/content/src/importers.ts`
+- `packages/content/src/index.ts`
+- `packages/content/src/content.test.ts`
+- `apps/desktop/src/storage/repository.ts`
+- `apps/desktop/src/storage/types.ts`
+- `apps/desktop/src/App.tsx`
+- `docs/TASK_PLAN.md`
+
+验证情况：
+
+- 已运行 `pnpm format`，格式化项目文件。
+- 已运行 `pnpm typecheck`，递归类型检查通过。
+- 已运行 `pnpm lint`，ESLint 检查通过。
+- 已运行 `pnpm test`，2 个测试文件、11 条用例通过。
+- 已运行 `pnpm desktop:build`，桌面端 Vite 构建通过。
+- 已运行 `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`，Tauri 原生层测试通过。
+- 已运行 `pnpm --filter @bestlng/desktop exec tauri build --no-bundle`，release 构建通过，并生成
+  `apps/desktop/src-tauri/target/release/bestlng-desktop.exe`。
+
+遗留问题：
+
+- CSV 导入的语言、许可证和作者信息当前使用第一版默认值，后续可以在导入前增加元数据确认表单。
+- 当前导入会把 CSV 文件作为新内容包导入，不做重复内容智能合并；第一版本地自用足够稳定。
+
+下一步建议：继续执行任务清单中的第一个未完成任务，实现今日复习、复习结果记录和下次复习时间计算。
+
 ## 7. 接入本地数据层与本地自用 v1 闭环
 
 本阶段在 subagent 协作下，把 BestLNG 从静态桌面工作台推进到可本地自用的 v1 基础闭环。
