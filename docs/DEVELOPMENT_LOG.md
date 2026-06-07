@@ -222,6 +222,49 @@ React + TypeScript 桌面端骨架。
 
 下一步建议：继续执行任务清单中的第一个未完成任务，实现今日复习、复习结果记录和下次复习时间计算。
 
+## 10. 实现今日复习与下次复习计算
+
+本阶段补齐单词本复习闭环，让到期词条可以直接在桌面端记录复习结果，并自动安排下一次复习。
+
+新增或更新的主要内容：
+
+- 桌面端仓储层新增 `reviewVocabularyEntry` 公共 API。
+- 复用 `packages/core` 中已有的 `scheduleNextReview` 调度逻辑，支持 `again`、`hard`、
+  `good`、`easy` 四档评分。
+- 记录复习结果时会更新 `review_queue` 的到期时间、间隔天数、易度因子、重复次数和遗忘次数。
+- 同步更新 `vocabulary_entries` 的 `status`、`next_review_at`、`due_count` 和 `updated_at`。
+- 单词本页对到期词条显示“再来 / 困难 / 记住 / 简单”按钮，点击后刷新工作台状态。
+- 增加复习按钮的桌面与移动端布局样式，避免词条行在小屏幕下挤压。
+- 更新 `docs/TASK_PLAN.md`，将“实现今日复习、复习结果记录和下次复习时间计算”标记为完成。
+
+主要修改文件：
+
+- `apps/desktop/src/storage/repository.ts`
+- `apps/desktop/src/storage/types.ts`
+- `apps/desktop/src/App.tsx`
+- `apps/desktop/src/styles.css`
+- `docs/TASK_PLAN.md`
+
+验证情况：
+
+- 已运行 `pnpm format`，格式化项目文件。
+- 已运行 `pnpm typecheck`，递归类型检查通过。
+- 已运行 `pnpm lint`，ESLint 检查通过。
+- 已运行 `pnpm test`，2 个测试文件、11 条用例通过。
+- 已运行 `pnpm desktop:build`，桌面端 Vite 构建通过。
+- 已运行 `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`，Tauri 原生层测试通过。
+- 已运行 `pnpm --filter @bestlng/desktop exec tauri build --no-bundle`，release 构建通过，并生成
+  `apps/desktop/src-tauri/target/release/bestlng-desktop.exe`。
+
+遗留问题：
+
+- 当前复习结果记录没有单独的历史明细表，只更新当前队列状态；第一版本地自用已能完成复习安排，
+  后续若要统计复习质量曲线，可以新增 `review_attempts` 表。
+- 当前复习入口在单词本页，到期词也会在今日页展示；后续可把评分按钮也放进今日页复习队列。
+
+下一步建议：继续执行任务清单中的第一个未完成任务，实现学习统计、设置、数据导入导出这一组的清单归档，
+或先为第一版补充根目录 `LICENSE` 和 GitHub Release 安装包。
+
 ## 7. 接入本地数据层与本地自用 v1 闭环
 
 本阶段在 subagent 协作下，把 BestLNG 从静态桌面工作台推进到可本地自用的 v1 基础闭环。

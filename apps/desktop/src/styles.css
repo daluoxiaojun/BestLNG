@@ -718,7 +718,7 @@ h2 {
 
 .word-row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto 80px;
+    grid-template-columns: minmax(0, 1fr) auto 80px minmax(220px, auto);
     gap: 12px;
     align-items: center;
     min-height: 68px;
@@ -737,6 +737,29 @@ h2 {
 
 .next-review {
     text-align: right;
+}
+
+.review-actions {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(48px, 1fr));
+    gap: 6px;
+}
+
+.mini-button {
+    min-height: 34px;
+    padding: 0 8px;
+    border: 1px solid #c7d7e5;
+    border-radius: 8px;
+    background: #f6fbff;
+    color: #2f5775;
+    font-size: 0.8125rem;
+    font-weight: 800;
+    white-space: nowrap;
+}
+
+.mini-button:hover {
+    border-color: #98b7ce;
+    background: #e8f3fb;
 }
 
 .pack-card {
@@ -981,6 +1004,14 @@ fieldset.setting-row {
     .pack-card,
     .word-row {
         grid-template-columns: 1fr;
+    }
+
+    .next-review {
+        text-align: left;
+    }
+
+    .review-actions {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     h1 {

@@ -1,5 +1,11 @@
-import { aggregateLearningStats, createClozeExercise, gradeClozeExercise } from "@bestlng/core";
+import {
+    aggregateLearningStats,
+    createClozeExercise,
+    gradeClozeExercise,
+    scheduleNextReview,
+} from "@bestlng/core";
 import type { AnswerNormalizationOptions, ClozeExercise, PracticeAttempt } from "@bestlng/core";
+import type { ReviewRating, ReviewState } from "@bestlng/core";
 import {
     createExerciseInputsFromPackage,
     parseContentPackageCsv,
@@ -21,6 +27,7 @@ import type {
     SubmitClozeAnswerResult,
     UserSettings,
     VocabularyEntryView,
+    VocabularyReviewResult,
     WeakWordView,
     WeeklyPracticePoint,
 } from "./types";
@@ -80,6 +87,14 @@ interface VocabularyRow {
     readonly next_review_at: string;
     readonly status: "learning" | "needs_review" | "mastered";
     readonly term: string;
+}
+
+interface ReviewQueueRow {
+    readonly due_at: string;
+    readonly ease_factor: number;
+    readonly interval_days: number;
+    readonly lapses: number;
+    readonly repetitions: number;
 }
 
 interface AttemptRow {
@@ -1166,6 +1181,101 @@ export async function importContentPackageFile(): Promise<ContentImportResult | 
     return {
         importedSentenceCount: exercises.length,
         packageName: contentPackage.manifest.name,
+        state: await loadFromDatabase(db),
+    };
+}
+
+function createFallbackReviewState(entry: VocabularyEntryView): ReviewState {
+    return {
+        dueAt: entry.nextReviewAt,
+        easeFactor: 2.5,
+        intervalDays: 0,
+        lapses: entry.dueCount,
+        repetitions: entry.status === "mastered" ? 2 : 0,
+    };
+}
+
+/**
+ * 记录一次单词复习结果，并计算下一次复习时间。
+ */
+export async function reviewVocabularyEntry(
+    vocabularyEntryId: string,
+    rating: ReviewRating,
+): Promise<VocabularyReviewResult> {
+    const currentState = await loadLearningWorkspace();
+    const vocabularyEntry = currentState.vocabulary.find((entry) => entry.id === vocabularyEntryId);
+
+    if (vocabularyEntry === undefined) {
+        throw new Error("找不到要复习的词条。");
+    }
+
+    const reviewedAt = new Date();
+    const db = await getDatabase();
+
+    if (db === null) {
+        return {
+            nextReviewAt: vocabularyEntry.nextReviewAt,
+            state: loadFromMemory(),
+        };
+    }
+
+    const rows = await db.select<ReviewQueueRow[]>(
+        `SELECT due_at, interval_days, ease_factor, repetitions, lapses
+           FROM review_queue
+          WHERE vocabulary_id = $1
+          LIMIT 1`,
+        [vocabularyEntryId],
+    );
+    const reviewState =
+        rows[0] === undefined
+            ? createFallbackReviewState(vocabularyEntry)
+            : {
+                  dueAt: rows[0].due_at,
+                  easeFactor: rows[0].ease_factor,
+                  intervalDays: rows[0].interval_days,
+                  lapses: rows[0].lapses,
+                  repetitions: rows[0].repetitions,
+              };
+    const nextReview = scheduleNextReview(reviewState, rating, reviewedAt);
+    const nextStatus =
+        rating === "again" ? "needs_review" : nextReview.repetitions >= 3 ? "mastered" : "learning";
+    const nextDueCount =
+        rating === "again" ? vocabularyEntry.dueCount + 1 : vocabularyEntry.dueCount;
+
+    await db.execute(
+        `INSERT INTO review_queue
+            (id, vocabulary_id, due_at, interval_days, ease_factor, repetitions, lapses, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)
+         ON CONFLICT(vocabulary_id) DO UPDATE SET
+            due_at = excluded.due_at,
+            interval_days = excluded.interval_days,
+            ease_factor = excluded.ease_factor,
+            repetitions = excluded.repetitions,
+            lapses = excluded.lapses,
+            updated_at = CURRENT_TIMESTAMP`,
+        [
+            `review-${vocabularyEntryId}`,
+            vocabularyEntryId,
+            nextReview.dueAt,
+            nextReview.intervalDays,
+            nextReview.easeFactor,
+            nextReview.repetitions,
+            nextReview.lapses,
+        ],
+    );
+
+    await db.execute(
+        `UPDATE vocabulary_entries
+            SET status = $1,
+                next_review_at = $2,
+                due_count = $3,
+                updated_at = CURRENT_TIMESTAMP
+          WHERE id = $4`,
+        [nextStatus, nextReview.dueAt, nextDueCount, vocabularyEntryId],
+    );
+
+    return {
+        nextReviewAt: nextReview.dueAt,
         state: await loadFromDatabase(db),
     };
 }

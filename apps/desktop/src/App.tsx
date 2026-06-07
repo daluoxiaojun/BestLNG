@@ -14,9 +14,11 @@ import {
     importContentPackageFile,
     importLearningBackup,
     loadLearningWorkspace,
+    reviewVocabularyEntry,
     saveUserSettings,
     submitClozeAnswer,
 } from "./storage/repository";
+import type { ReviewRating } from "@bestlng/core";
 import type {
     AnswerStrictness,
     LearningWorkspaceState,
@@ -412,7 +414,13 @@ function PageContent({
                 />
             );
         case "vocabulary":
-            return <VocabularyPanel vocabulary={state.vocabulary} />;
+            return (
+                <VocabularyPanel
+                    onAnnouncement={onAnnouncement}
+                    onStateChange={onStateChange}
+                    vocabulary={state.vocabulary}
+                />
+            );
         case "packs":
             return (
                 <PacksPanel
@@ -685,11 +693,17 @@ function renderClozeSentence(sentence: string): ReactElement[] {
 }
 
 function VocabularyPanel({
+    onAnnouncement,
+    onStateChange,
     vocabulary,
 }: {
+    onAnnouncement: (message: string) => void;
+    onStateChange: (state: LearningWorkspaceState) => void;
     vocabulary: readonly VocabularyEntryView[];
 }): ReactElement {
     const [filter, setFilter] = useState<"all" | "due" | "mastered">("all");
+    const [reviewingEntryId, setReviewingEntryId] = useState<string | null>(null);
+    const [reviewMessage, setReviewMessage] = useState<string | null>(null);
     const now = new Date();
     const filteredVocabulary = vocabulary.filter((entry) => {
         if (filter === "due") {
@@ -702,6 +716,30 @@ function VocabularyPanel({
 
         return true;
     });
+    const handleReview = async (
+        entry: VocabularyEntryView,
+        rating: ReviewRating,
+    ): Promise<void> => {
+        setReviewingEntryId(entry.id);
+        setReviewMessage(null);
+
+        try {
+            const result = await reviewVocabularyEntry(entry.id, rating);
+
+            onStateChange(result.state);
+            setReviewMessage(
+                `${entry.term} 已安排到 ${formatDateLabel(result.nextReviewAt)} 复习。`,
+            );
+            onAnnouncement("复习结果已记录。");
+        } catch (error) {
+            const message = error instanceof Error ? error.message : "记录复习结果失败。";
+
+            setReviewMessage(message);
+            onAnnouncement(message);
+        } finally {
+            setReviewingEntryId(null);
+        }
+    };
 
     return (
         <section className="panel" aria-labelledby="vocabulary-title">
@@ -741,9 +779,20 @@ function VocabularyPanel({
                 </div>
             </div>
 
+            {reviewMessage === null ? null : (
+                <p className="form-note" role="status">
+                    {reviewMessage}
+                </p>
+            )}
+
             <div className="word-list" role="list">
                 {filteredVocabulary.map((entry) => (
-                    <WordRow entry={entry} key={entry.id} />
+                    <WordRow
+                        entry={entry}
+                        isReviewing={reviewingEntryId === entry.id}
+                        key={entry.id}
+                        onReview={handleReview}
+                    />
                 ))}
                 {filteredVocabulary.length === 0 ? (
                     <div className="empty-state empty-state--compact">当前筛选下没有词条。</div>
@@ -753,7 +802,17 @@ function VocabularyPanel({
     );
 }
 
-function WordRow({ entry }: { entry: VocabularyEntryView }): ReactElement {
+function WordRow({
+    entry,
+    isReviewing,
+    onReview,
+}: {
+    entry: VocabularyEntryView;
+    isReviewing: boolean;
+    onReview: (entry: VocabularyEntryView, rating: ReviewRating) => Promise<void>;
+}): ReactElement {
+    const isDue = new Date(entry.nextReviewAt) <= new Date();
+
     return (
         <article className="word-row" role="listitem">
             <div>
@@ -762,6 +821,30 @@ function WordRow({ entry }: { entry: VocabularyEntryView }): ReactElement {
             </div>
             <span className="compact-badge">{getStatusLabel(entry.status)}</span>
             <span className="next-review">{formatDateLabel(entry.nextReviewAt)}</span>
+            {isDue ? (
+                <div className="review-actions" aria-label={`${entry.term} 复习评分`}>
+                    {(
+                        [
+                            ["again", "再来"],
+                            ["hard", "困难"],
+                            ["good", "记住"],
+                            ["easy", "简单"],
+                        ] as const
+                    ).map(([rating, label]) => (
+                        <button
+                            className="mini-button"
+                            disabled={isReviewing}
+                            key={rating}
+                            onClick={() => {
+                                void onReview(entry, rating);
+                            }}
+                            type="button"
+                        >
+                            {isReviewing ? "记录中" : label}
+                        </button>
+                    ))}
+                </div>
+            ) : null}
         </article>
     );
 }

@@ -28,6 +28,11 @@ export interface VocabularyEntryView {
     readonly term: string;
 }
 
+export interface VocabularyReviewResult {
+    readonly nextReviewAt: string;
+    readonly state: LearningWorkspaceState;
+}
+
 export interface WeeklyPracticePoint {
     readonly day: string;
     readonly value: number;
