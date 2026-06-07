@@ -94,6 +94,8 @@ fn bestlng_migrations() -> Vec<Migration> {
 pub fn run() {
     // 原生入口保持轻量，业务逻辑优先沉淀到前端和共享核心包中。
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         .plugin(
             tauri_plugin_sql::Builder::default()
                 .add_migrations(BESTLNG_DATABASE_URL, bestlng_migrations())

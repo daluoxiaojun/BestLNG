@@ -129,6 +129,55 @@ React + TypeScript 桌面端骨架。
 下一步建议：继续执行 `docs/TASK_PLAN.md` 中的第一个未完成任务，设计基础页面结构：
 今日练习、句子填空、单词本、内容包、统计、设置。
 
+## 8. 实现本地数据备份恢复
+
+本阶段继续推进本地自用第一版，完成了 SQLite 学习数据的版本化 JSON 备份与恢复能力。
+
+新增或更新的主要内容：
+
+- 桌面端新增 Tauri `dialog` 和 `fs` 插件，用于选择备份文件路径并读写本地 JSON 文件。
+- 在仓储层新增 `exportLearningBackup` 和 `importLearningBackup` 公共 API。
+- 备份文件包含 `appId`、`schemaVersion`、`exportedAt` 和核心数据表快照，当前版本为
+  `schemaVersion: 1`。
+- 恢复时会校验备份归属和版本号，再按外键依赖顺序清空并写回内容包、句子、空位、词条、
+  练习记录、复习队列和设置。
+- 设置页开放“导出本地数据”和“恢复备份”按钮，恢复成功后刷新当前工作台状态。
+- 更新 `docs/TASK_PLAN.md`，将“实现数据备份、恢复和版本兼容策略”标记为完成。
+
+主要修改或新增文件：
+
+- `apps/desktop/package.json`
+- `apps/desktop/src-tauri/Cargo.toml`
+- `apps/desktop/src-tauri/Cargo.lock`
+- `apps/desktop/src-tauri/capabilities/default.json`
+- `apps/desktop/src-tauri/src/lib.rs`
+- `apps/desktop/src/App.tsx`
+- `apps/desktop/src/storage/repository.ts`
+- `apps/desktop/src/storage/types.ts`
+- `apps/desktop/src/styles.css`
+- `pnpm-lock.yaml`
+- `docs/TASK_PLAN.md`
+
+验证情况：
+
+- 已运行 `pnpm format`，格式化项目文件。
+- 已运行 `pnpm lint`，ESLint 检查通过。
+- 已运行 `pnpm typecheck`，递归类型检查通过。
+- 已运行 `pnpm test`，2 个测试文件、9 条用例通过。
+- 已运行 `pnpm desktop:build`，桌面端 Vite 构建通过。
+- 已运行 `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`，Tauri 原生层测试通过。
+- 已运行 `pnpm --filter @bestlng/desktop exec tauri build --no-bundle`，release 构建通过，并生成
+  `apps/desktop/src-tauri/target/release/bestlng-desktop.exe`。
+
+遗留问题：
+
+- 备份恢复当前采用整库替换策略，第一版本地自用足够直接；后续如果增加云同步或多设备合并，
+  需要再设计增量合并策略。
+- `docs/DEVELOPMENT_LOG.md` 历史上存在第 7 条早于第 6、第 5 条的乱序记录；本阶段遵守追加规则，
+  未重写旧日志，只在末尾继续追加第 8 条。
+
+下一步建议：继续执行任务清单中的第一个未完成任务，支持 CSV、JSON 等基础格式导入。
+
 ## 7. 接入本地数据层与本地自用 v1 闭环
 
 本阶段在 subagent 协作下，把 BestLNG 从静态桌面工作台推进到可本地自用的 v1 基础闭环。

@@ -9,7 +9,13 @@ import {
 
 import { getPageHash, navigationItems, type PageId } from "./app/navigation";
 import { usePageRouter } from "./app/usePageRouter";
-import { loadLearningWorkspace, saveUserSettings, submitClozeAnswer } from "./storage/repository";
+import {
+    exportLearningBackup,
+    importLearningBackup,
+    loadLearningWorkspace,
+    saveUserSettings,
+    submitClozeAnswer,
+} from "./storage/repository";
 import type {
     AnswerStrictness,
     LearningWorkspaceState,
@@ -880,6 +886,9 @@ function SettingsPanel({
 }): ReactElement {
     const [formState, setFormState] = useState<UserSettings>(state.settings);
     const [isSaving, setIsSaving] = useState(false);
+    const [isExporting, setIsExporting] = useState(false);
+    const [isImporting, setIsImporting] = useState(false);
+    const [operationMessage, setOperationMessage] = useState<string | null>(null);
 
     useEffect(() => {
         setFormState(state.settings);
@@ -896,6 +905,56 @@ function SettingsPanel({
             onAnnouncement("设置已保存。");
         } finally {
             setIsSaving(false);
+        }
+    };
+
+    const handleExport = async (): Promise<void> => {
+        setIsExporting(true);
+        setOperationMessage(null);
+
+        try {
+            const exportedPath = await exportLearningBackup();
+
+            if (exportedPath === null) {
+                setOperationMessage("已取消导出。");
+                return;
+            }
+
+            setOperationMessage("本地数据已导出为 JSON 备份。");
+            onAnnouncement("本地数据已导出。");
+        } catch (error) {
+            const message = error instanceof Error ? error.message : "导出本地数据失败。";
+
+            setOperationMessage(message);
+            onAnnouncement(message);
+        } finally {
+            setIsExporting(false);
+        }
+    };
+
+    const handleImport = async (): Promise<void> => {
+        setIsImporting(true);
+        setOperationMessage(null);
+
+        try {
+            const result = await importLearningBackup();
+
+            if (result === null) {
+                setOperationMessage("已取消恢复。");
+                return;
+            }
+
+            setFormState(result.state.settings);
+            onStateChange(result.state);
+            setOperationMessage("备份已恢复，工作台数据已刷新。");
+            onAnnouncement("备份已恢复。");
+        } catch (error) {
+            const message = error instanceof Error ? error.message : "恢复本地数据失败。";
+
+            setOperationMessage(message);
+            onAnnouncement(message);
+        } finally {
+            setIsImporting(false);
         }
     };
 
@@ -983,13 +1042,36 @@ function SettingsPanel({
                 </label>
 
                 <div className="form-actions">
-                    <button className="secondary-button" disabled type="button">
-                        导出本地数据
+                    <button
+                        className="secondary-button"
+                        disabled={!state.isPersistent || isExporting || isImporting}
+                        onClick={() => {
+                            void handleExport();
+                        }}
+                        type="button"
+                    >
+                        {isExporting ? "导出中" : "导出本地数据"}
+                    </button>
+                    <button
+                        className="secondary-button"
+                        disabled={!state.isPersistent || isExporting || isImporting}
+                        onClick={() => {
+                            void handleImport();
+                        }}
+                        type="button"
+                    >
+                        {isImporting ? "恢复中" : "恢复备份"}
                     </button>
                     <button className="primary-button" disabled={isSaving} type="submit">
                         {isSaving ? "保存中" : "保存设置"}
                     </button>
                 </div>
+
+                {operationMessage === null ? null : (
+                    <p className="form-note" role="status">
+                        {operationMessage}
+                    </p>
+                )}
             </form>
         </section>
     );

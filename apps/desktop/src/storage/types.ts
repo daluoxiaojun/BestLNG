@@ -65,3 +65,8 @@ export interface SubmitClozeAnswerResult {
     readonly grade: ClozeGradeResult;
     readonly state: LearningWorkspaceState;
 }
+
+export interface BackupImportResult {
+    readonly importedAt: string;
+    readonly state: LearningWorkspaceState;
+}

@@ -1,10 +1,13 @@
 import { aggregateLearningStats, createClozeExercise, gradeClozeExercise } from "@bestlng/core";
 import type { AnswerNormalizationOptions, ClozeExercise, PracticeAttempt } from "@bestlng/core";
+import { open, save } from "@tauri-apps/plugin-dialog";
+import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import Database from "@tauri-apps/plugin-sql";
 
 import { starterContentPackage, starterExerciseInputs } from "./seed";
 import type {
     AnswerStrictness,
+    BackupImportResult,
     ContentPackView,
     LearningWorkspaceState,
     SubmitClozeAnswerInput,
@@ -16,6 +19,8 @@ import type {
 } from "./types";
 
 const databaseUrl = "sqlite:bestlng.db";
+const backupAppId = "bestlng";
+const backupSchemaVersion = 1;
 
 const defaultSettings: UserSettings = {
     autoAddWrongAnswers: true,
@@ -78,6 +83,68 @@ interface AttemptRow {
     readonly sentence_id: string;
 }
 
+interface BackupContentPackRow extends ContentPackRow {
+    readonly created_at: string;
+}
+
+interface BackupSentenceRow extends SentenceRow {
+    readonly created_at: string;
+    readonly level: string;
+    readonly source_lang: string;
+    readonly target_lang: string;
+}
+
+interface BackupBlankRow extends BlankRow {
+    readonly display_order: number;
+}
+
+interface BackupVocabularyRow extends VocabularyRow {
+    readonly created_at: string;
+    readonly lang: string;
+    readonly updated_at: string;
+}
+
+interface BackupPracticeAttemptRow {
+    readonly answer: string;
+    readonly blank_id: string;
+    readonly created_at: string;
+    readonly id: string;
+    readonly is_correct: SqlBool;
+    readonly normalized_answer: string;
+    readonly sentence_id: string;
+}
+
+interface BackupReviewQueueRow {
+    readonly created_at: string;
+    readonly due_at: string;
+    readonly ease_factor: number;
+    readonly id: string;
+    readonly interval_days: number;
+    readonly lapses: number;
+    readonly repetitions: number;
+    readonly updated_at: string;
+    readonly vocabulary_id: string;
+}
+
+interface BackupSettingRow extends SettingRow {
+    readonly updated_at: string;
+}
+
+interface LearningBackupV1 {
+    readonly appId: typeof backupAppId;
+    readonly exportedAt: string;
+    readonly schemaVersion: typeof backupSchemaVersion;
+    readonly tables: {
+        readonly appSettings: readonly BackupSettingRow[];
+        readonly contentPacks: readonly BackupContentPackRow[];
+        readonly practiceAttempts: readonly BackupPracticeAttemptRow[];
+        readonly reviewQueue: readonly BackupReviewQueueRow[];
+        readonly sentenceBlanks: readonly BackupBlankRow[];
+        readonly sentences: readonly BackupSentenceRow[];
+        readonly vocabularyEntries: readonly BackupVocabularyRow[];
+    };
+}
+
 let databasePromise: Promise<Database> | null = null;
 let memorySettings = defaultSettings;
 let memoryAttempts: AttemptRow[] = [];
@@ -120,6 +187,44 @@ function parseStringArray(value: string): string[] {
     }
 
     return [];
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function assertBackupPayload(value: unknown): asserts value is LearningBackupV1 {
+    if (!isObject(value)) {
+        throw new Error("备份文件不是有效的 JSON 对象。");
+    }
+
+    if (value.appId !== backupAppId) {
+        throw new Error("备份文件不属于 BestLNG。");
+    }
+
+    if (value.schemaVersion !== backupSchemaVersion) {
+        throw new Error(`暂不支持该备份版本：${String(value.schemaVersion)}。`);
+    }
+
+    if (typeof value.exportedAt !== "string" || !isObject(value.tables)) {
+        throw new Error("备份文件缺少必要的版本或数据表信息。");
+    }
+
+    const tableNames = [
+        "appSettings",
+        "contentPacks",
+        "practiceAttempts",
+        "reviewQueue",
+        "sentenceBlanks",
+        "sentences",
+        "vocabularyEntries",
+    ] as const;
+
+    for (const tableName of tableNames) {
+        if (!Array.isArray(value.tables[tableName])) {
+            throw new Error(`备份文件缺少 ${tableName} 数据表。`);
+        }
+    }
 }
 
 function getAnswerOptions(strictness: AnswerStrictness): Partial<AnswerNormalizationOptions> {
@@ -430,6 +535,202 @@ async function loadFromDatabase(db: Database): Promise<LearningWorkspaceState> {
     });
 }
 
+async function createLearningBackup(db: Database): Promise<LearningBackupV1> {
+    const [
+        appSettings,
+        contentPacks,
+        practiceAttempts,
+        reviewQueue,
+        sentenceBlanks,
+        sentences,
+        vocabularyEntries,
+    ] = await Promise.all([
+        db.select<BackupSettingRow[]>("SELECT key, value, updated_at FROM app_settings"),
+        db.select<BackupContentPackRow[]>(
+            `SELECT id, title, description, source, license_name, license_url, is_enabled, created_at
+               FROM content_packs
+              ORDER BY created_at ASC`,
+        ),
+        db.select<BackupPracticeAttemptRow[]>(
+            `SELECT id, sentence_id, blank_id, answer, normalized_answer, is_correct, created_at
+               FROM practice_attempts
+              ORDER BY created_at ASC`,
+        ),
+        db.select<BackupReviewQueueRow[]>(
+            `SELECT id, vocabulary_id, due_at, interval_days, ease_factor, repetitions, lapses,
+                    created_at, updated_at
+               FROM review_queue
+              ORDER BY due_at ASC`,
+        ),
+        db.select<BackupBlankRow[]>(
+            `SELECT id, sentence_id, answer, accepted_answers, hint, display_order
+               FROM sentence_blanks
+              ORDER BY sentence_id ASC, display_order ASC`,
+        ),
+        db.select<BackupSentenceRow[]>(
+            `SELECT id, pack_id, source_lang, target_lang, text, translation, level, tags, created_at
+               FROM sentences
+              ORDER BY created_at ASC`,
+        ),
+        db.select<BackupVocabularyRow[]>(
+            `SELECT id, term, meaning, lang, status, next_review_at, due_count, created_at, updated_at
+               FROM vocabulary_entries
+              ORDER BY term ASC`,
+        ),
+    ]);
+
+    return {
+        appId: backupAppId,
+        exportedAt: new Date().toISOString(),
+        schemaVersion: backupSchemaVersion,
+        tables: {
+            appSettings,
+            contentPacks,
+            practiceAttempts,
+            reviewQueue,
+            sentenceBlanks,
+            sentences,
+            vocabularyEntries,
+        },
+    };
+}
+
+async function replaceDatabaseFromBackup(db: Database, backup: LearningBackupV1): Promise<void> {
+    try {
+        // 恢复采用整库替换策略，顺序按外键依赖从子表到父表清空，再从父表到子表写回。
+        await db.execute("BEGIN IMMEDIATE TRANSACTION");
+        await db.execute("DELETE FROM review_queue");
+        await db.execute("DELETE FROM practice_attempts");
+        await db.execute("DELETE FROM vocabulary_entries");
+        await db.execute("DELETE FROM sentence_blanks");
+        await db.execute("DELETE FROM sentences");
+        await db.execute("DELETE FROM content_packs");
+        await db.execute("DELETE FROM app_settings");
+
+        for (const row of backup.tables.contentPacks) {
+            await db.execute(
+                `INSERT INTO content_packs
+                    (id, title, description, source, license_name, license_url, is_enabled, created_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+                [
+                    row.id,
+                    row.title,
+                    row.description,
+                    row.source,
+                    row.license_name,
+                    row.license_url,
+                    row.is_enabled,
+                    row.created_at,
+                ],
+            );
+        }
+
+        for (const row of backup.tables.sentences) {
+            await db.execute(
+                `INSERT INTO sentences
+                    (id, pack_id, source_lang, target_lang, text, translation, level, tags, created_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+                [
+                    row.id,
+                    row.pack_id,
+                    row.source_lang,
+                    row.target_lang,
+                    row.text,
+                    row.translation,
+                    row.level,
+                    row.tags,
+                    row.created_at,
+                ],
+            );
+        }
+
+        for (const row of backup.tables.sentenceBlanks) {
+            await db.execute(
+                `INSERT INTO sentence_blanks
+                    (id, sentence_id, answer, accepted_answers, hint, display_order)
+                 VALUES ($1, $2, $3, $4, $5, $6)`,
+                [
+                    row.id,
+                    row.sentence_id,
+                    row.answer,
+                    row.accepted_answers,
+                    row.hint,
+                    row.display_order,
+                ],
+            );
+        }
+
+        for (const row of backup.tables.vocabularyEntries) {
+            await db.execute(
+                `INSERT INTO vocabulary_entries
+                    (id, term, meaning, lang, status, next_review_at, due_count, created_at, updated_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+                [
+                    row.id,
+                    row.term,
+                    row.meaning,
+                    row.lang,
+                    row.status,
+                    row.next_review_at,
+                    row.due_count,
+                    row.created_at,
+                    row.updated_at,
+                ],
+            );
+        }
+
+        for (const row of backup.tables.practiceAttempts) {
+            await db.execute(
+                `INSERT INTO practice_attempts
+                    (id, sentence_id, blank_id, answer, normalized_answer, is_correct, created_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+                [
+                    row.id,
+                    row.sentence_id,
+                    row.blank_id,
+                    row.answer,
+                    row.normalized_answer,
+                    row.is_correct,
+                    row.created_at,
+                ],
+            );
+        }
+
+        for (const row of backup.tables.reviewQueue) {
+            await db.execute(
+                `INSERT INTO review_queue
+                    (id, vocabulary_id, due_at, interval_days, ease_factor, repetitions, lapses,
+                     created_at, updated_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+                [
+                    row.id,
+                    row.vocabulary_id,
+                    row.due_at,
+                    row.interval_days,
+                    row.ease_factor,
+                    row.repetitions,
+                    row.lapses,
+                    row.created_at,
+                    row.updated_at,
+                ],
+            );
+        }
+
+        for (const row of backup.tables.appSettings) {
+            await db.execute(
+                `INSERT INTO app_settings (key, value, updated_at)
+                 VALUES ($1, $2, $3)`,
+                [row.key, row.value, row.updated_at],
+            );
+        }
+
+        await db.execute("COMMIT");
+    } catch (error) {
+        await db.execute("ROLLBACK");
+        throw error;
+    }
+}
+
 function getMemoryRows(): {
     readonly blanks: readonly BlankRow[];
     readonly contentPacks: readonly ContentPackRow[];
@@ -614,4 +915,79 @@ export async function saveUserSettings(settings: UserSettings): Promise<Learning
     await saveSettingsToDatabase(db, sanitizedSettings);
 
     return loadFromDatabase(db);
+}
+
+/**
+ * 将当前 SQLite 学习数据导出为版本化 JSON 备份。
+ *
+ * @returns 用户选择保存路径时返回文件路径；取消保存时返回 null。
+ */
+export async function exportLearningBackup(): Promise<string | null> {
+    const db = await getDatabase();
+
+    if (db === null) {
+        throw new Error("当前处于浏览器预览模式，无法访问桌面端文件系统。");
+    }
+
+    await seedDatabase(db);
+
+    const selectedPath = await save({
+        defaultPath: `bestlng-backup-${new Date().toISOString().slice(0, 10)}.json`,
+        filters: [
+            {
+                extensions: ["json"],
+                name: "BestLNG 备份文件",
+            },
+        ],
+        title: "导出 BestLNG 本地数据",
+    });
+
+    if (selectedPath === null) {
+        return null;
+    }
+
+    const backup = await createLearningBackup(db);
+
+    await writeTextFile(selectedPath, `${JSON.stringify(backup, null, 2)}\n`);
+
+    return selectedPath;
+}
+
+/**
+ * 从版本化 JSON 备份恢复 SQLite 学习数据。
+ *
+ * @returns 恢复完成时间和刷新后的工作台状态。
+ */
+export async function importLearningBackup(): Promise<BackupImportResult | null> {
+    const db = await getDatabase();
+
+    if (db === null) {
+        throw new Error("当前处于浏览器预览模式，无法访问桌面端文件系统。");
+    }
+
+    const selectedPath = await open({
+        filters: [
+            {
+                extensions: ["json"],
+                name: "BestLNG 备份文件",
+            },
+        ],
+        multiple: false,
+        title: "恢复 BestLNG 本地数据",
+    });
+
+    if (selectedPath === null || Array.isArray(selectedPath)) {
+        return null;
+    }
+
+    const fileContent = await readTextFile(selectedPath);
+    const parsed: unknown = JSON.parse(fileContent);
+
+    assertBackupPayload(parsed);
+    await replaceDatabaseFromBackup(db, parsed);
+
+    return {
+        importedAt: new Date().toISOString(),
+        state: await loadFromDatabase(db),
+    };
 }

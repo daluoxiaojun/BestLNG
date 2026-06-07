@@ -925,6 +925,17 @@ fieldset.setting-row {
     padding-top: 8px;
 }
 
+.form-note {
+    margin: 0;
+    padding: 10px 12px;
+    border: 1px solid #c6d8e7;
+    border-radius: 8px;
+    background: #f4f9fd;
+    color: #2f5775;
+    font-size: 0.9rem;
+    font-weight: 700;
+}
+
 @media (max-width: 980px) {
     .app-shell {
         grid-template-columns: 1fr;
