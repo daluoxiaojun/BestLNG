@@ -265,6 +265,35 @@ React + TypeScript 桌面端骨架。
 下一步建议：继续执行任务清单中的第一个未完成任务，实现学习统计、设置、数据导入导出这一组的清单归档，
 或先为第一版补充根目录 `LICENSE` 和 GitHub Release 安装包。
 
+## 11. 归档学习统计、设置与数据导入导出任务
+
+本阶段没有新增业务代码，主要根据当前实现状态同步长期任务清单。
+
+归档依据：
+
+- 学习统计已在桌面端展示练习数量、正确率、连续学习天数、薄弱词汇和最近七天练习量。
+- 设置页已支持每日目标、答案严格度、自动加入错词复习队列、仅启用许可证确认内容包等偏好保存。
+- 数据导出与恢复已通过版本化 JSON 备份实现。
+- 内容包导入已支持 CSV 和 JSON 文件。
+
+主要修改文件：
+
+- `docs/TASK_PLAN.md`
+- `docs/DEVELOPMENT_LOG.md`
+
+验证情况：
+
+- 本阶段只更新文档清单和日志；在归档前，上一阶段已完成 `pnpm format:check`、`pnpm lint`、
+  `pnpm typecheck`、`pnpm test`、`pnpm desktop:build`、`cargo test` 和 Tauri release 构建。
+- 本阶段仍会在提交前运行 `pnpm format:check`，确认文档格式符合 Prettier。
+
+遗留问题：
+
+- 后续发布相关任务仍未完成，包括 Cloudflare Pages、GitHub Releases、Tauri updater 和 GitHub Actions。
+- 这些任务属于分发与更新能力，不影响当前桌面端本地自用第一版。
+
+下一步建议：如继续推进分发体验，优先补根目录 `LICENSE`，再配置 GitHub Releases 和 Tauri updater。
+
 ## 7. 接入本地数据层与本地自用 v1 闭环
 
 本阶段在 subagent 协作下，把 BestLNG 从静态桌面工作台推进到可本地自用的 v1 基础闭环。
