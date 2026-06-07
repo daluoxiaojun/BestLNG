@@ -1,0 +1,67 @@
+import type { ClozeExercise, ClozeGradeResult } from "@bestlng/core";
+
+export type AnswerStrictness = "relaxed" | "standard" | "strict";
+
+export interface UserSettings {
+    readonly autoAddWrongAnswers: boolean;
+    readonly dailyTarget: number;
+    readonly onlyLicensedContent: boolean;
+    readonly strictness: AnswerStrictness;
+}
+
+export interface ContentPackView {
+    readonly description: string;
+    readonly id: string;
+    readonly isEnabled: boolean;
+    readonly licenseName: string;
+    readonly licenseUrl: string;
+    readonly source: string;
+    readonly title: string;
+}
+
+export interface VocabularyEntryView {
+    readonly dueCount: number;
+    readonly id: string;
+    readonly meaning: string;
+    readonly nextReviewAt: string;
+    readonly status: "learning" | "needs_review" | "mastered";
+    readonly term: string;
+}
+
+export interface WeeklyPracticePoint {
+    readonly day: string;
+    readonly value: number;
+}
+
+export interface WeakWordView {
+    readonly term: string;
+    readonly totalCount: number;
+    readonly wrongCount: number;
+}
+
+export interface LearningWorkspaceState {
+    readonly activeExercise: ClozeExercise | null;
+    readonly contentPacks: readonly ContentPackView[];
+    readonly correctRate: number;
+    readonly dueVocabularyCount: number;
+    readonly isPersistent: boolean;
+    readonly settings: UserSettings;
+    readonly streakDays: number;
+    readonly todayAttemptCount: number;
+    readonly totalAttempts: number;
+    readonly totalSentences: number;
+    readonly vocabulary: readonly VocabularyEntryView[];
+    readonly weakWords: readonly WeakWordView[];
+    readonly weeklyPractice: readonly WeeklyPracticePoint[];
+}
+
+export interface SubmitClozeAnswerInput {
+    readonly exercise: ClozeExercise;
+    readonly submittedAnswers: Readonly<Record<string, string>>;
+}
+
+export interface SubmitClozeAnswerResult {
+    readonly expectedAnswer: string;
+    readonly grade: ClozeGradeResult;
+    readonly state: LearningWorkspaceState;
+}

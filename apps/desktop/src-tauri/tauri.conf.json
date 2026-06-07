@@ -1,0 +1,36 @@
+{
+    "$schema": "https://schema.tauri.app/config/2",
+    "app": {
+        "security": {
+            "csp": null
+        },
+        "windows": [
+            {
+                "height": 760,
+                "minHeight": 640,
+                "minWidth": 960,
+                "resizable": true,
+                "title": "BestLNG",
+                "width": 1180
+            }
+        ]
+    },
+    "build": {
+        "beforeBuildCommand": "pnpm build",
+        "beforeDevCommand": "pnpm dev",
+        "devUrl": "http://127.0.0.1:1420",
+        "frontendDist": "../dist"
+    },
+    "bundle": {
+        "active": true,
+        "targets": "all"
+    },
+    "identifier": "com.daluoxiaojun.bestlng",
+    "plugins": {
+        "sql": {
+            "preload": ["sqlite:bestlng.db"]
+        }
+    },
+    "productName": "BestLNG",
+    "version": "0.0.0"
+}

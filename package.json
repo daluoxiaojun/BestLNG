@@ -1,0 +1,32 @@
+{
+    "name": "bestlng",
+    "version": "0.0.0",
+    "private": true,
+    "description": "本地优先的开源语言学习工具。",
+    "type": "module",
+    "packageManager": "pnpm@10.17.1",
+    "scripts": {
+        "desktop:build": "pnpm --filter @bestlng/desktop build",
+        "desktop:dev": "pnpm --filter @bestlng/desktop dev",
+        "desktop:tauri": "pnpm --filter @bestlng/desktop tauri:dev",
+        "lint": "eslint .",
+        "typecheck": "pnpm -r --if-present typecheck",
+        "test": "vitest run --passWithNoTests",
+        "format": "prettier --write .",
+        "format:check": "prettier --check ."
+    },
+    "engines": {
+        "node": ">=22.0.0",
+        "pnpm": ">=10.0.0"
+    },
+    "devDependencies": {
+        "@eslint/js": "^10.0.1",
+        "@types/node": "^25.9.2",
+        "eslint": "^10.4.1",
+        "globals": "^17.6.0",
+        "prettier": "^3.8.3",
+        "typescript": "^6.0.3",
+        "typescript-eslint": "^8.60.1",
+        "vitest": "^4.1.8"
+    }
+}

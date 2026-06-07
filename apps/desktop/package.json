@@ -1,0 +1,31 @@
+{
+    "name": "@bestlng/desktop",
+    "version": "0.0.0",
+    "private": true,
+    "description": "BestLNG 桌面客户端。",
+    "type": "module",
+    "scripts": {
+        "build": "pnpm typecheck && vite build",
+        "dev": "vite --host 127.0.0.1",
+        "preview": "vite preview",
+        "tauri": "tauri",
+        "tauri:build": "tauri build",
+        "tauri:dev": "tauri dev",
+        "typecheck": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json"
+    },
+    "devDependencies": {
+        "@tauri-apps/cli": "^2.11.2",
+        "@types/react": "^19.2.17",
+        "@types/react-dom": "^19.2.3",
+        "@vitejs/plugin-react": "^6.0.2",
+        "vite": "^8.0.16"
+    },
+    "dependencies": {
+        "@bestlng/content": "workspace:*",
+        "@bestlng/core": "workspace:*",
+        "@tauri-apps/api": "^2.11.0",
+        "@tauri-apps/plugin-sql": "^2.4.0",
+        "react": "^19.2.7",
+        "react-dom": "^19.2.7"
+    }
+}

@@ -1,0 +1,39 @@
+# 依赖目录
+node_modules/
+.pnpm-store/
+
+# 构建产物
+dist/
+build/
+coverage/
+.turbo/
+.cache/
+
+# Tauri / Rust 产物
+target/
+src-tauri/target/
+**/src-tauri/target/
+**/src-tauri/gen/
+*.pdb
+
+# 环境变量与本地密钥
+.env
+.env.*
+!.env.example
+
+# 日志与临时文件
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+tmp/
+temp/
+
+# 编辑器与系统文件
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.DS_Store
+Thumbs.db
