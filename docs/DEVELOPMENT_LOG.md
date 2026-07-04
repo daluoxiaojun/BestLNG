@@ -439,3 +439,411 @@ Tauri release 构建通过，并生成桌面程序：
 
 下一步建议：继续执行 `docs/TASK_PLAN.md` 中的第一个未完成任务，设计基础页面结构：
 今日练习、句子填空、单词本、内容包、统计、设置。
+
+## 12. 准备 Cloudflare Pages 部署配置
+
+本阶段继续推进官网发布页部署任务。由于当前 Wrangler 登录态不可用，且非交互环境无法执行
+`wrangler login`，本阶段没有完成真实 Cloudflare Pages 首次上线；但已补齐后续部署所需的
+本地配置和脚本。
+
+新增或更新的主要内容：
+
+- 为 `@bestlng/site` 添加 Wrangler 开发依赖。
+- 新增根目录 `site:preview` 和 `site:deploy` 脚本。
+- 新增站点 `deploy` 脚本，使用 `wrangler pages deploy . --project-name bestlng` 发布静态页。
+- 新增 `wrangler.toml`，声明 Cloudflare Pages 项目名和静态文件目录。
+- 更新 `apps/site/README.md`，记录登录检查和部署命令。
+- 更新 `docs/TASK_PLAN.md`，将 Cloudflare Pages 部署拆成配置准备和真实首次部署两个子任务。
+
+主要修改或新增文件：
+
+- `package.json`
+- `apps/site/package.json`
+- `pnpm-lock.yaml`
+- `wrangler.toml`
+- `apps/site/README.md`
+- `docs/TASK_PLAN.md`
+- `docs/DEVELOPMENT_LOG.md`
+
+验证情况：
+
+- 已运行 `corepack pnpm dlx wrangler whoami`，确认 Wrangler 可用但当前未登录，无法在非交互环境
+  继续真实部署。
+- 已运行 `corepack pnpm format`，格式化项目文件。
+- 已运行 `corepack pnpm lint`，ESLint 检查通过。
+- 已运行 `corepack pnpm typecheck`，递归类型检查通过。
+- 已运行 `corepack pnpm test`，2 个测试文件、11 条用例通过。
+- 已运行 `corepack pnpm site:deploy`，部署脚本已正确调用 Wrangler；命令因缺少
+  `CLOUDFLARE_API_TOKEN` 停止，未完成真实部署。
+
+遗留问题：
+
+- 需要用户在交互终端运行 `pnpm --filter @bestlng/site exec wrangler login`，或提供
+  `CLOUDFLARE_API_TOKEN` 后，再执行 `pnpm site:deploy` 完成首次部署。
+- 首次部署成功后，再把 `docs/TASK_PLAN.md` 中“部署到 Cloudflare Pages”及其首次部署子项标记为完成。
+
+## 13. 修复桌面端 SQLite 初始化权限
+
+本阶段根据验收反馈修复桌面端启动后提示“加载本地数据失败”的问题。浏览器预览可用，是因为浏览器
+环境会使用内存预览数据；真实 Tauri 桌面端会连接 SQLite，并在首次启动时写入示例内容包。
+
+问题原因：
+
+- Tauri SQL 插件的 `sql:default` 权限只允许加载连接、关闭连接和查询。
+- 桌面端初始化 SQLite 时需要执行 `INSERT` 写入示例内容包和默认设置。
+- 缺少 `sql:allow-execute` 会导致初始化写入被权限系统拒绝。
+
+主要修改文件：
+
+- `apps/desktop/src-tauri/capabilities/default.json`
+- `apps/desktop/src/App.tsx`
+- `docs/DEVELOPMENT_LOG.md`
+
+验证情况：
+
+- 已运行 `corepack pnpm format`，格式化项目文件。
+- 已运行 `corepack pnpm lint`，ESLint 检查通过。
+- 已运行 `corepack pnpm typecheck`，递归类型检查通过。
+- 已运行 `corepack pnpm test`，2 个测试文件、11 条用例通过。
+- 已运行 `corepack pnpm desktop:build`，桌面端 Vite 构建通过。
+- 已运行 `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`，Tauri 原生层测试通过。
+- 已运行 `corepack pnpm --filter @bestlng/desktop exec tauri build --no-bundle`，release 构建通过，
+  并生成 `apps/desktop/src-tauri/target/release/bestlng-desktop.exe`。
+
+遗留问题：
+
+- 需要重启正在运行的 Tauri 桌面端，让新的 capability 权限生效。
+
+## 14. 生成四六级、雅思和托福考试内容包
+
+本阶段根据用户要求，补充 4 个可直接导入 BestLNG 桌面端的考试词包。
+
+新增或更新的主要内容：
+
+- 新增考试内容包生成脚本 `packages/content/scripts/generate_exam_packs.py`。
+- 从 ECDICT 读取 `cet4`、`cet6`、`ielts`、`toefl` 标签词条，保留词表、释义、考试标签和来源信息。
+- 优先从 Tatoeba CC0 英文句子导出中匹配真实英文例句。
+- Tatoeba 没有匹配到的词条使用 BestLNG 原创兜底例句，保证每个词都能形成挖空练习。
+- 生成 4 个 JSON 内容包，可在桌面端“内容包”页面直接选择导入：
+    - `packages/content/packs/exam/bestlng-cet4-en-zh.json`
+    - `packages/content/packs/exam/bestlng-cet6-en-zh.json`
+    - `packages/content/packs/exam/bestlng-ielts-en-zh.json`
+    - `packages/content/packs/exam/bestlng-toefl-en-zh.json`
+- 新增 `packages/content/packs/exam/README.md`，记录来源、许可证和生成统计。
+- 更新 `packages/content/README.md` 和 `docs/TASK_PLAN.md`。
+- 增加测试，确保生成的 4 个 JSON 内容包都能通过现有内容包 schema 校验和 JSON 导入解析。
+
+生成结果：
+
+- CET4：3846 条，其中 3399 条匹配 Tatoeba CC0 英文例句，447 条使用原创兜底例句。
+- CET6：5406 条，其中 4355 条匹配 Tatoeba CC0 英文例句，1051 条使用原创兜底例句。
+- IELTS：5038 条，其中 4007 条匹配 Tatoeba CC0 英文例句，1031 条使用原创兜底例句。
+- TOEFL：6970 条，其中 4580 条匹配 Tatoeba CC0 英文例句，2390 条使用原创兜底例句。
+
+验证情况：
+
+- 已运行 `corepack pnpm format`，格式化项目文件。
+- 已运行 `corepack pnpm lint`，ESLint 检查通过。
+- 已运行 `corepack pnpm typecheck`，递归类型检查通过。
+- 已运行 `corepack pnpm test`，2 个测试文件、12 条用例通过。
+- 已运行 `corepack pnpm desktop:build`，桌面端 Vite 构建通过。
+
+遗留问题：
+
+- 当前中文侧使用 ECDICT 释义生成练习提示，不是逐句人工翻译；后续如果引入许可证明确的中文句对，
+  可以替换成更自然的完整中文翻译。
+
+## 15. 接入考试词包为桌面端默认内容
+
+本阶段根据用户要求，将已生成的 CET4、CET6、IELTS、TOEFL 4 个考试词包接入桌面端默认内容。
+
+新增或更新的主要内容：
+
+- `apps/desktop/src/storage/seed.ts` 引入 4 个考试 JSON 内容包，并组成内置内容包列表。
+- `apps/desktop/src/storage/repository.ts` 的初始化逻辑改为按内容包 id 检查并补齐缺失内置包。
+- 已启动过旧版本的本地数据库也会在下次启动时自动补齐 4 个考试内容包，不再需要手动导入。
+- 保留原有入门示例包作为第一个内置包。
+- 更新 `docs/TASK_PLAN.md`，记录考试包已接入默认词本。
+
+验证情况：
+
+- 已运行 `corepack pnpm format`，格式化项目文件。
+- 已运行 `corepack pnpm lint`，ESLint 检查通过。
+- 已运行 `corepack pnpm typecheck`，递归类型检查通过。
+- 已运行 `corepack pnpm test`，2 个测试文件、12 条用例通过。
+- 已运行 `corepack pnpm desktop:build`，桌面端 Vite 构建通过。
+
+遗留问题：
+
+- 4 个考试包作为默认内容打入前端 bundle 后，桌面端主 JS 增大到约 9.7 MB，gzip 后约 2.3 MB。
+  当前桌面端可接受；后续如果追求更小首包，可以把内置内容包改为懒加载静态资源。
+- 需要重启正在运行的 Tauri 桌面端，让新的默认内容 seed 逻辑生效。
+
+## 16. 修复考试词本初始化并补充官网展示
+
+本阶段根据用户验收截图修复桌面端启动时报
+`cannot rollback - no transaction is active` 的问题，并补齐官网发布页对新增词本的展示。
+
+问题原因：
+
+- 前端通过 Tauri SQL 插件连续执行 `BEGIN / INSERT / COMMIT / ROLLBACK`，大批量写入时可能被底层
+  SQL 连接池分配到不同连接，失败后无条件 `ROLLBACK` 又覆盖了真实错误。
+- 官网发布页是纯静态 HTML，之前不会自动读取 `packages/content/packs`，所以页面上看不到新增词本。
+
+新增或更新的主要内容：
+
+- 桌面端新增原生命令 `upsert_content_package`，使用 Rust `sqlx` 单连接事务写入内容包、句子、
+  空位和初始词条，避免跨调用事务失效。
+- 前端仓储层改为先复用内容包 schema 校验，再把内置包或用户导入包交给原生命令写库。
+- SQLite 初始化会按每个内置内容包的句子数判断是否需要补齐；旧数据库只有入门包时，下次启动会自动补齐
+  CET4、CET6、IELTS、TOEFL。
+- 内容包页增加句子数展示，浏览器预览模式也会展示 5 个内置内容包。
+- 错题复习队列修复同一单词跨多个考试包时的词条 id 查找，避免按空位 id 假设词条必然存在。
+- 官网发布页新增“内置考试词本”区块，展示 4 个考试词本的词条数、Tatoeba 例句数、原创兜底数和来源说明。
+- 新增 Rust 单元测试，确认前端传入的 camelCase 内容包 payload 可以正确反序列化。
+
+主要修改或新增文件：
+
+- `apps/desktop/src-tauri/Cargo.toml`
+- `apps/desktop/src-tauri/Cargo.lock`
+- `apps/desktop/src-tauri/src/lib.rs`
+- `apps/desktop/src/App.tsx`
+- `apps/desktop/src/storage/repository.ts`
+- `apps/desktop/src/storage/seed.ts`
+- `apps/desktop/src/storage/types.ts`
+- `apps/site/index.html`
+- `apps/site/styles.css`
+- `docs/TASK_PLAN.md`
+- `docs/DEVELOPMENT_LOG.md`
+
+验证情况：
+
+- 已运行 `corepack pnpm format`，格式化项目文件。
+- 已运行 `corepack pnpm format:check`，格式检查通过。
+- 已运行 `corepack pnpm lint`，ESLint 检查通过。
+- 已运行 `corepack pnpm typecheck`，递归类型检查通过。
+- 已运行 `corepack pnpm test`，2 个测试文件、12 条用例通过。
+- 已运行 `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`，原生层 1 条测试通过。
+- 已运行 `corepack pnpm desktop:build`，桌面端 Vite 构建通过。
+- 已运行 `corepack pnpm --filter @bestlng/desktop exec tauri build --no-bundle`，release 构建通过，并生成
+  `apps/desktop/src-tauri/target/release/bestlng-desktop.exe`。
+- 已启动 release 版桌面端并查询真实 SQLite 数据库，确认旧库从 1 个入门包自动补齐到 5 个内容包：
+    - 入门包 8 句
+    - CET4 3846 句
+    - CET6 5406 句
+    - IELTS 5038 句
+    - TOEFL 6970 句
+    - 总句子数 21268，去重词条数 10573
+
+遗留问题：
+
+- 4 个考试包仍然直接打入前端 bundle，生产构建主 JS 约 9.7 MB，gzip 后约 2.3 MB；当前可用，
+  后续如果要优化启动体积，可以把内置包改为 Tauri resource 或懒加载静态资源。
+- 官网发布页本地内容已更新，但 Cloudflare Pages 首次真实部署仍需要 Cloudflare 登录态或 API Token。
+
+## 17. 支持按当前词本分类学习
+
+本阶段根据用户反馈修正学习范围：之前内置词本和导入词本都进入同一套练习数据，体验上像“全库混学”。
+现在桌面端新增“当前学习词本”机制，用户在内容包页点击某个词本的“开始学习”后，今日练习、句子填空、
+单词本和统计都会只读取这个词本里的句子、挖空词和练习记录，更接近百词斩、不背单词这类商业单词软件的
+词本选择体验。
+
+新增或更新的主要内容：
+
+- `app_settings` 新增 `activeContentPackId` 设置，用来保存当前学习词本。
+- 首次启动或旧库升级时，如果没有已选词本，会自动回退到第一个启用词本并保存。
+- 仓储层加载状态时按当前词本过滤 `sentences`、`sentence_blanks`、`practice_attempts` 和单词本数据。
+- 单词表改为从当前词本的挖空词生成，解决同一个单词跨多个词本时被错误合并或漏展示的问题。
+- 内容包页新增“开始学习 / 正在学习”按钮和当前词本高亮，切换后立即刷新工作台状态。
+- 今日练习、句子填空、单词本和统计页都显示当前词本名称，避免用户误以为仍在全库混学。
+- 浏览器预览模式也按当前词本过滤，方便开发态验收。
+- 新增 `activeContentPack` 纯函数和测试，覆盖“保留已选启用词本”和“不可用时回退第一个启用词本”。
+
+主要修改或新增文件：
+
+- `apps/desktop/src/App.tsx`
+- `apps/desktop/src/storage/activeContentPack.ts`
+- `apps/desktop/src/storage/activeContentPack.test.ts`
+- `apps/desktop/src/storage/repository.ts`
+- `apps/desktop/src/storage/types.ts`
+- `apps/desktop/src/styles.css`
+- `docs/TASK_PLAN.md`
+- `docs/DEVELOPMENT_LOG.md`
+
+验证情况：
+
+- 已运行 `corepack pnpm format`，格式化项目文件。
+- 已运行 `corepack pnpm format:check`，格式检查通过。
+- 已运行 `corepack pnpm lint`，ESLint 检查通过。
+- 已运行 `corepack pnpm typecheck`，递归类型检查通过。
+- 已运行 `corepack pnpm test`，3 个测试文件、14 条用例通过。
+- 已运行 `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`，原生层 1 条测试通过。
+- 已运行 `corepack pnpm desktop:build`，桌面端 Vite 构建通过。
+- 已运行 `corepack pnpm --filter @bestlng/desktop exec tauri build --no-bundle`，release 构建通过，并生成
+  `apps/desktop/src-tauri/target/release/bestlng-desktop.exe`。
+- 已启动 release 版桌面端并查询真实 SQLite 数据库，确认旧库会自动保存
+  `activeContentPackId=bestlng-starter-en-zh`，默认入门包加载为 8 句、8 个词条。
+
+遗留问题：
+
+- 当前已经做到“选择哪个词本就只学哪个词本”，但还没有商业单词软件常见的学习计划能力，例如每日新词数、
+  按顺序解锁、整本词书学习进度、已学/未学/复习分组。后续可以在当前词本机制之上继续补。
+
+## 18. 优化内置考试词本学习顺序
+
+本阶段根据用户反馈修正内置考试词本的默认顺序。之前 CET4、CET6、IELTS、TOEFL 词包基本沿用
+ECDICT 原始导出顺序，体验上接近按字母表学习，容易出现同前缀/形近词连续堆叠，也不符合商业单词软件
+常见的“词书范围 + 新词顺序 + 复习调度”体验。
+
+调研结论：
+
+- 新词引入不适合简单按字母表排序，优先级应更多参考词频、考试核心度和学习阶段。
+- 相似词、同前缀词连续出现会增加混淆风险，应尽量分散。
+- 已学词的再次出现应交给复习调度；本阶段只处理“词本中新词的默认学习顺序”。
+
+新增或更新的主要内容：
+
+- `packages/content/scripts/generate_exam_packs.py` 新增学习排序策略：
+    - 使用 ECDICT 的 `collins`、`oxford`、`bnc`、`frq` 和考试标签估计优先级。
+    - CET4/CET6 保留基础高频词靠前。
+    - IELTS/TOEFL 会把过于基础的短高频功能词适度后置，让开头更贴近目标考试词本。
+    - 使用 8 词窗口分散同前缀/形近词，减少连续学习相似词的干扰。
+- 重新生成 4 个考试 JSON 词包，词条数量保持不变：
+    - CET4：3846 条
+    - CET6：5406 条
+    - IELTS：5038 条
+    - TOEFL：6970 条
+- 每条句子的 `tags` 新增 `order:00001` 这类稳定学习序号。
+- 桌面端仓储层按 `order:` 标签排序出题，并让单词本展示顺序与学习顺序一致。
+- 旧数据库启动时会根据内置包描述变化自动刷新词包元数据和句子内容；句子 ID 保持稳定，避免丢失已有练习记录。
+- 内容包测试增加防回归校验，确认考试词包带有学习序号，且前 50 个词不会退回字母表顺序。
+- `packages/content/packs/exam/README.md` 补充词序策略说明。
+
+主要修改或新增文件：
+
+- `apps/desktop/src/storage/repository.ts`
+- `packages/content/scripts/generate_exam_packs.py`
+- `packages/content/src/content.test.ts`
+- `packages/content/packs/exam/bestlng-cet4-en-zh.json`
+- `packages/content/packs/exam/bestlng-cet6-en-zh.json`
+- `packages/content/packs/exam/bestlng-ielts-en-zh.json`
+- `packages/content/packs/exam/bestlng-toefl-en-zh.json`
+- `packages/content/packs/exam/README.md`
+- `docs/TASK_PLAN.md`
+- `docs/DEVELOPMENT_LOG.md`
+
+验证情况：
+
+- 已运行 `python packages/content/scripts/generate_exam_packs.py`，成功重新生成 4 个内置考试词本。
+- 已运行 Node 抽查脚本，确认各考试词本前 20 个词已经不是字母表顺序，且 manifest 版本为 `0.2.0`。
+- 已运行 `corepack pnpm format`，格式化项目文件。
+- 已运行 `corepack pnpm format:check`，格式检查通过。
+- 已运行 `corepack pnpm lint`，ESLint 检查通过。
+- 已运行 `corepack pnpm typecheck`，递归类型检查通过。
+- 已运行 `corepack pnpm test`，3 个测试文件、14 条用例通过。
+- 已运行 `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`，原生层 1 条测试通过。
+- 已运行 `corepack pnpm desktop:build`，桌面端 Vite 构建通过。
+- 已运行 `corepack pnpm --filter @bestlng/desktop exec tauri build --no-bundle`，release 构建通过，并生成
+  `apps/desktop/src-tauri/target/release/bestlng-desktop.exe`。
+
+遗留问题：
+
+- 当前排序仍是离线启发式策略，不是完整个性化算法；后续如果要更像商业单词软件，还需要新增每日新词数、
+  新词/复习混排、整本词书进度、用户熟词跳过和按正确率动态调整顺序。
+
+## 19. 重设计桌面端沉浸阅读风格界面
+
+本阶段根据用户确认的 A 风格方向，对桌面端前端做了一轮整体设计收敛：从偏后台/工程调试台的蓝白界面，
+调整为暖白纸感、深墨绿、安静阅读式的学习界面，更接近“不背单词”一类沉浸阅读产品的气质。
+
+新增或更新的主要内容：
+
+- 主视觉改为暖白背景、纸张卡片、深墨绿主按钮、柔和阴影和轻量进入动效。
+- 侧边栏、页面标题、统计卡片、练习卡、词书卡片、复习列表和设置表单统一了圆角、间距、颜色和交互反馈。
+- 练习页改成“先读英文句子，再根据释义线索填写缺失词”的结构。
+- 做题前不再展示完整翻译中包含目标词的文案，避免提前泄题；正确答案和完整提示只在提交后反馈里展示。
+- 词书页从“内容包元数据列表”改成书架式卡片，只展示词书名、用途、句子数和学习状态。
+- 主学习流移除了 `SQLite`、许可证长串、JSON/CSV 等技术性或开发者视角文案。
+- 导航和页面摘要从工程语言改为学习产品语言，例如“词书”“读句子，补缺词”“练习趋势和薄弱词”。
+- 考试词包生成脚本去掉“这句英文用于练习 xxx”这类生成痕迹，并将内置考试词包版本升到 `0.3.0`，
+  让旧数据库启动时自动刷新不会泄题的提示文本。
+- 在 CSS 中补充 `prefers-reduced-motion` 兼容，保留焦点态、触控尺寸和响应式布局。
+
+主要修改或新增文件：
+
+- `apps/desktop/src/App.tsx`
+- `apps/desktop/src/app/navigation.ts`
+- `apps/desktop/src/styles.css`
+- `packages/content/scripts/generate_exam_packs.py`
+- `packages/content/packs/exam/bestlng-cet4-en-zh.json`
+- `packages/content/packs/exam/bestlng-cet6-en-zh.json`
+- `packages/content/packs/exam/bestlng-ielts-en-zh.json`
+- `packages/content/packs/exam/bestlng-toefl-en-zh.json`
+- `docs/TASK_PLAN.md`
+- `docs/DEVELOPMENT_LOG.md`
+
+验证情况：
+
+- 已运行 `python packages/content/scripts/generate_exam_packs.py`，重新生成 4 个考试词本。
+- 已运行主前端文本扫描，确认 `apps/desktop/src/App.tsx`、`styles.css` 和 `navigation.ts` 中不再残留
+  `SQLite`、`Tatoeba`、`ECDICT`、许可证、`JSON`、`CSV`、`用于练习` 等主界面不该出现的文案。
+- 已运行 Node 抽查脚本，确认 4 个考试词本版本为 `0.3.0`，且首条提示不再包含目标词泄题文案。
+- 已运行 `corepack pnpm format`，格式化项目文件。
+- 已运行 `corepack pnpm format:check`，格式检查通过。
+- 已运行 `corepack pnpm lint`，ESLint 检查通过。
+- 已运行 `corepack pnpm typecheck`，递归类型检查通过。
+- 已运行 `corepack pnpm test`，3 个测试文件、14 条用例通过。
+- 已运行 `corepack pnpm desktop:build`，桌面端 Vite 构建通过。
+- 已运行 `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`，原生层 1 条测试通过。
+- 已运行 `corepack pnpm --filter @bestlng/desktop exec tauri build --no-bundle`，release 构建通过，并生成
+  `apps/desktop/src-tauri/target/release/bestlng-desktop.exe`。
+
+遗留问题：
+
+- 由于当前环境缺少 Playwright 浏览器内核，未能自动截图；本阶段已通过构建、文本扫描和真实 release 构建做验证。
+- 4 个考试词包仍直接打入前端 bundle，构建时仍有 chunk 体积提醒；后续可改为 Tauri resource 或懒加载资源。
+
+## 20. 添加 MIT 许可证并提交推送积压改动
+
+本阶段根据用户要求处理仓库安全与合规两件事：为项目补充开源许可证，并把第 12~19 阶段
+积压在工作区的全部改动分组提交、推送到 GitHub。此前本地 `main` 与 `origin/main` 都停在
+第 11 阶段对应的提交，第 12~19 阶段约 2700 行改动和 15 MB 内容包数据只存在于工作区，
+存在丢失风险。
+
+新增或更新的主要内容：
+
+- 新增根目录 `LICENSE`，采用 MIT 许可证（用户确认选择），版权归属 `2026 daluoxiaojun`。
+- `README.md` 末尾新增“许可证”章节，说明代码采用 MIT 开源，内容数据的来源与许可证
+  见 `packages/content/packs/exam/README.md`。
+- 4 个考试词包 JSON（约 15 MB）按用户确认直接进入 Git 仓库，不使用 Git LFS。
+- 将工作区积压改动按依赖顺序分成 5 个提交推送到 `origin/main`：
+    1. `feat: 生成内置考试词包与学习顺序`：packages/content 的词包数据、生成脚本和测试。
+    2. `feat: 桌面端接入考试词本与沉浸阅读界面`：apps/desktop 前端与 Rust 原生层。
+    3. `feat: 官网展示考试词本并准备 Cloudflare 部署`：apps/site、wrangler.toml、根脚本与锁文件。
+    4. `chore: 添加 MIT 许可证`：LICENSE 与 README.md。
+    5. `docs: 同步阶段日志与任务清单`：docs 目录。
+
+主要修改或新增文件：
+
+- `LICENSE`
+- `README.md`
+- `docs/DEVELOPMENT_LOG.md`
+
+验证情况：
+
+- 本次会话开始时已运行 `corepack pnpm lint`、`corepack pnpm typecheck` 和
+  `corepack pnpm test`（3 个测试文件、14 条用例），全部通过；此后仅新增 LICENSE
+  和文档内容，不影响验证结论。
+- 已运行 `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`，原生层测试通过。
+- 文档修改后已运行 `corepack pnpm format` 和 `corepack pnpm format:check`，格式检查通过。
+- 提交前已确认 `wrangler.toml` 不含敏感信息，untracked 目录中没有误入的原始语料大文件。
+
+遗留问题：
+
+- Cloudflare Pages 首次真实部署仍需要用户在交互终端登录 Wrangler 或提供
+  `CLOUDFLARE_API_TOKEN`。
+- 词包 JSON 直接进入 Git 后，若后续频繁重新生成导致仓库历史膨胀，可以再评估改用
+  Git LFS 或 Release 附件分发。
+
+下一步建议：完成 Cloudflare Pages 首次部署并归档任务清单第 8 节，随后进入第 9 节配置
+GitHub Releases、GitHub Actions 构建安装包和 Tauri updater。
