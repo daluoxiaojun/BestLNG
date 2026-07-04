@@ -1,6 +1,11 @@
 import { createExerciseInputsFromPackage } from "@bestlng/content";
 import type { ContentPackage } from "@bestlng/content";
 
+import cet4ContentPackage from "../../../../packages/content/packs/exam/bestlng-cet4-en-zh.json";
+import cet6ContentPackage from "../../../../packages/content/packs/exam/bestlng-cet6-en-zh.json";
+import ieltsContentPackage from "../../../../packages/content/packs/exam/bestlng-ielts-en-zh.json";
+import toeflContentPackage from "../../../../packages/content/packs/exam/bestlng-toefl-en-zh.json";
+
 export const starterContentPackage: ContentPackage = {
     manifest: {
         authors: ["BestLNG contributors"],
@@ -77,3 +82,15 @@ export const starterContentPackage: ContentPackage = {
 };
 
 export const starterExerciseInputs = createExerciseInputsFromPackage(starterContentPackage);
+
+export const builtInContentPackages: readonly ContentPackage[] = [
+    starterContentPackage,
+    cet4ContentPackage as ContentPackage,
+    cet6ContentPackage as ContentPackage,
+    ieltsContentPackage as ContentPackage,
+    toeflContentPackage as ContentPackage,
+];
+
+export const builtInExerciseInputs = builtInContentPackages.flatMap((contentPackage) =>
+    createExerciseInputsFromPackage(contentPackage),
+);

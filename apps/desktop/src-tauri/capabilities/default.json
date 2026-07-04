@@ -8,6 +8,7 @@
         "dialog:allow-save",
         "fs:allow-read-text-file",
         "fs:allow-write-text-file",
+        "sql:allow-execute",
         "sql:default"
     ],
     "windows": ["main"]

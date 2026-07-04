@@ -10,32 +10,32 @@ export const defaultPageId: PageId = "today";
 
 export const navigationItems: readonly NavigationItem[] = [
     {
-        description: "目标、复习队列和下一组练习",
+        description: "计划、进度和待复习",
         id: "today",
         label: "今日练习",
     },
     {
-        description: "翻译提示、挖空输入和答案反馈",
+        description: "读句子，补缺词",
         id: "cloze",
         label: "句子填空",
     },
     {
-        description: "错词、熟词和复习状态",
+        description: "词义、熟悉度和复习",
         id: "vocabulary",
         label: "单词本",
     },
     {
-        description: "本地内容包与许可证信息",
+        description: "选择要学的词书",
         id: "packs",
-        label: "内容包",
+        label: "词书",
     },
     {
-        description: "正确率、连续学习和薄弱项",
+        description: "练习趋势和薄弱词",
         id: "stats",
         label: "统计",
     },
     {
-        description: "每日目标、判题严格度和数据选项",
+        description: "目标、判题和备份",
         id: "settings",
         label: "设置",
     },

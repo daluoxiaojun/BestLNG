@@ -3,6 +3,7 @@ import type { ClozeExercise, ClozeGradeResult } from "@bestlng/core";
 export type AnswerStrictness = "relaxed" | "standard" | "strict";
 
 export interface UserSettings {
+    readonly activeContentPackId: string;
     readonly autoAddWrongAnswers: boolean;
     readonly dailyTarget: number;
     readonly onlyLicensedContent: boolean;
@@ -15,6 +16,7 @@ export interface ContentPackView {
     readonly isEnabled: boolean;
     readonly licenseName: string;
     readonly licenseUrl: string;
+    readonly sentenceCount: number;
     readonly source: string;
     readonly title: string;
 }
@@ -33,6 +35,11 @@ export interface VocabularyReviewResult {
     readonly state: LearningWorkspaceState;
 }
 
+export interface SelectContentPackResult {
+    readonly activeContentPackId: string;
+    readonly state: LearningWorkspaceState;
+}
+
 export interface WeeklyPracticePoint {
     readonly day: string;
     readonly value: number;
@@ -46,6 +53,7 @@ export interface WeakWordView {
 
 export interface LearningWorkspaceState {
     readonly activeExercise: ClozeExercise | null;
+    readonly activeContentPackId: string;
     readonly contentPacks: readonly ContentPackView[];
     readonly correctRate: number;
     readonly dueVocabularyCount: number;

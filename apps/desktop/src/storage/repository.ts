@@ -11,18 +11,21 @@ import {
     parseContentPackageCsv,
     parseContentPackageJson,
 } from "@bestlng/content";
-import type { ContentPackage, GeneratedClozeExerciseInput } from "@bestlng/content";
+import type { ContentPackage } from "@bestlng/content";
+import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import Database from "@tauri-apps/plugin-sql";
 
-import { starterContentPackage, starterExerciseInputs } from "./seed";
+import { resolveActiveContentPackIdFromPacks } from "./activeContentPack";
+import { builtInContentPackages, builtInExerciseInputs } from "./seed";
 import type {
     AnswerStrictness,
     BackupImportResult,
     ContentPackView,
     ContentImportResult,
     LearningWorkspaceState,
+    SelectContentPackResult,
     SubmitClozeAnswerInput,
     SubmitClozeAnswerResult,
     UserSettings,
@@ -37,6 +40,7 @@ const backupAppId = "bestlng";
 const backupSchemaVersion = 1;
 
 const defaultSettings: UserSettings = {
+    activeContentPackId: "",
     autoAddWrongAnswers: true,
     dailyTarget: 12,
     onlyLicensedContent: true,
@@ -47,6 +51,11 @@ type SqlBool = 0 | 1;
 
 interface CountRow {
     readonly count: number;
+}
+
+interface PackSeedRow {
+    readonly description: string;
+    readonly sentence_count: number;
 }
 
 interface SettingRow {
@@ -60,6 +69,7 @@ interface ContentPackRow {
     readonly is_enabled: SqlBool;
     readonly license_name: string;
     readonly license_url: string;
+    readonly sentence_count?: number;
     readonly source: string;
     readonly title: string;
 }
@@ -81,10 +91,14 @@ interface BlankRow {
 }
 
 interface VocabularyRow {
+    readonly blank_order?: number;
     readonly due_count: number;
     readonly id: string;
     readonly meaning: string;
     readonly next_review_at: string;
+    readonly pack_id?: string;
+    readonly sentence_id?: string;
+    readonly sentence_tags?: string;
     readonly status: "learning" | "needs_review" | "mastered";
     readonly term: string;
 }
@@ -211,6 +225,18 @@ function parseStringArray(value: string): string[] {
     return [];
 }
 
+function getLearningOrderFromTags(value: string): number {
+    const orderTag = parseStringArray(value).find((tag) => tag.startsWith("order:"));
+
+    if (orderTag === undefined) {
+        return Number.MAX_SAFE_INTEGER;
+    }
+
+    const order = Number.parseInt(orderTag.slice("order:".length), 10);
+
+    return Number.isFinite(order) ? order : Number.MAX_SAFE_INTEGER;
+}
+
 function isObject(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -296,177 +322,47 @@ function createImportedPackageId(filePath: string): string {
 }
 
 async function seedDatabase(db: Database): Promise<void> {
-    const existingRows = await db.select<CountRow[]>("SELECT COUNT(*) AS count FROM content_packs");
-
-    if ((existingRows[0]?.count ?? 0) > 0) {
-        return;
-    }
-
-    const manifest = starterContentPackage.manifest;
-
-    await db.execute(
-        `INSERT INTO content_packs
-            (id, title, description, source, license_name, license_url, is_enabled)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [
-            manifest.id,
-            manifest.name,
-            manifest.description ?? "",
-            manifest.authors.join(", "),
-            manifest.license?.name ?? "未声明",
-            manifest.license?.url ?? "",
-            1,
-        ],
-    );
-
-    for (const exercise of starterExerciseInputs) {
-        await db.execute(
-            `INSERT INTO sentences
-                (id, pack_id, source_lang, target_lang, text, translation, level, tags)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-            [
-                exercise.id,
-                exercise.sourcePackageId,
-                manifest.sourceLanguage,
-                manifest.targetLanguage,
-                exercise.sentence,
-                exercise.translation,
-                "A1",
-                JSON.stringify(exercise.tags),
-            ],
+    for (const contentPackage of builtInContentPackages) {
+        const expectedDescription = contentPackage.manifest.description ?? "";
+        const existingRows = await db.select<PackSeedRow[]>(
+            `SELECT content_packs.description,
+                    COUNT(sentences.id) AS sentence_count
+               FROM content_packs
+               LEFT JOIN sentences ON sentences.pack_id = content_packs.id
+              WHERE content_packs.id = $1
+              GROUP BY content_packs.description`,
+            [contentPackage.manifest.id],
         );
+        const existing = existingRows[0];
 
-        for (const [blankIndex, blank] of exercise.blanks.entries()) {
-            await db.execute(
-                `INSERT INTO sentence_blanks
-                    (id, sentence_id, answer, accepted_answers, hint, display_order)
-                 VALUES ($1, $2, $3, $4, $5, $6)`,
-                [
-                    blank.id,
-                    exercise.id,
-                    blank.answer,
-                    JSON.stringify(blank.acceptedAnswers ?? []),
-                    blank.hint ?? "",
-                    blankIndex,
-                ],
-            );
-
-            await db.execute(
-                `INSERT OR IGNORE INTO vocabulary_entries
-                    (id, term, meaning, lang, status, next_review_at)
-                 VALUES ($1, $2, $3, $4, $5, $6)`,
-                [
-                    `vocab-${blank.id}`,
-                    blank.answer,
-                    blank.hint ?? exercise.translation,
-                    manifest.sourceLanguage,
-                    "learning",
-                    new Date().toISOString(),
-                ],
-            );
+        if (
+            existing !== undefined &&
+            existing.sentence_count >= contentPackage.sentences.length &&
+            existing.description === expectedDescription
+        ) {
+            continue;
         }
+
+        await upsertContentPackage(contentPackage);
     }
 
-    await saveSettingsToDatabase(db, defaultSettings);
+    const settingsRows = await db.select<CountRow[]>("SELECT COUNT(*) AS count FROM app_settings");
+
+    if ((settingsRows[0]?.count ?? 0) === 0) {
+        await saveSettingsToDatabase(db, defaultSettings);
+    }
 }
 
-async function insertContentPackage(
-    db: Database,
-    contentPackage: ContentPackage,
-    exercises: readonly GeneratedClozeExerciseInput[],
-): Promise<void> {
-    const manifest = contentPackage.manifest;
+async function upsertContentPackage(contentPackage: ContentPackage): Promise<number> {
+    // 先在前端复用 schema 校验；真正的大批量写入交给原生层单事务完成。
+    createExerciseInputsFromPackage(contentPackage);
 
-    try {
-        // 内容包导入使用事务，避免导入到一半时留下孤立句子或空位。
-        await db.execute("BEGIN IMMEDIATE TRANSACTION");
-        await db.execute(
-            `INSERT INTO content_packs
-                (id, title, description, source, license_name, license_url, is_enabled)
-             VALUES ($1, $2, $3, $4, $5, $6, 1)
-             ON CONFLICT(id) DO UPDATE SET
-                title = excluded.title,
-                description = excluded.description,
-                source = excluded.source,
-                license_name = excluded.license_name,
-                license_url = excluded.license_url,
-                is_enabled = 1`,
-            [
-                manifest.id,
-                manifest.name,
-                manifest.description ?? "",
-                manifest.authors.join(", "),
-                manifest.license?.name ?? "未声明",
-                manifest.license?.url ?? "",
-            ],
-        );
-
-        for (const exercise of exercises) {
-            await db.execute("DELETE FROM sentence_blanks WHERE sentence_id = $1", [exercise.id]);
-            await db.execute(
-                `INSERT INTO sentences
-                    (id, pack_id, source_lang, target_lang, text, translation, level, tags)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                 ON CONFLICT(id) DO UPDATE SET
-                    pack_id = excluded.pack_id,
-                    source_lang = excluded.source_lang,
-                    target_lang = excluded.target_lang,
-                    text = excluded.text,
-                    translation = excluded.translation,
-                    level = excluded.level,
-                    tags = excluded.tags`,
-                [
-                    exercise.id,
-                    exercise.sourcePackageId,
-                    manifest.sourceLanguage,
-                    manifest.targetLanguage,
-                    exercise.sentence,
-                    exercise.translation,
-                    "A1",
-                    JSON.stringify(exercise.tags),
-                ],
-            );
-
-            for (const [blankIndex, blank] of exercise.blanks.entries()) {
-                await db.execute(
-                    `INSERT INTO sentence_blanks
-                        (id, sentence_id, answer, accepted_answers, hint, display_order)
-                     VALUES ($1, $2, $3, $4, $5, $6)`,
-                    [
-                        blank.id,
-                        exercise.id,
-                        blank.answer,
-                        JSON.stringify(blank.acceptedAnswers ?? []),
-                        blank.hint ?? "",
-                        blankIndex,
-                    ],
-                );
-
-                await db.execute(
-                    `INSERT OR IGNORE INTO vocabulary_entries
-                        (id, term, meaning, lang, status, next_review_at)
-                     VALUES ($1, $2, $3, $4, $5, $6)`,
-                    [
-                        `vocab-${blank.id}`,
-                        blank.answer,
-                        blank.hint ?? exercise.translation,
-                        manifest.sourceLanguage,
-                        "learning",
-                        new Date().toISOString(),
-                    ],
-                );
-            }
-        }
-
-        await db.execute("COMMIT");
-    } catch (error) {
-        await db.execute("ROLLBACK");
-        throw error;
-    }
+    return invoke<number>("upsert_content_package", { contentPackage });
 }
 
 async function saveSettingsToDatabase(db: Database, settings: UserSettings): Promise<void> {
     const settingsEntries: readonly [keyof UserSettings, string][] = [
+        ["activeContentPackId", settings.activeContentPackId],
         ["autoAddWrongAnswers", JSON.stringify(settings.autoAddWrongAnswers)],
         ["dailyTarget", String(settings.dailyTarget)],
         ["onlyLicensedContent", JSON.stringify(settings.onlyLicensedContent)],
@@ -488,6 +384,8 @@ function settingsFromRows(rows: readonly SettingRow[]): UserSettings {
     const strictness = values.get("strictness");
 
     return {
+        activeContentPackId:
+            values.get("activeContentPackId") ?? defaultSettings.activeContentPackId,
         autoAddWrongAnswers: values.get("autoAddWrongAnswers") === "true",
         dailyTarget: Number(values.get("dailyTarget") ?? defaultSettings.dailyTarget),
         onlyLicensedContent: values.get("onlyLicensedContent") !== "false",
@@ -511,21 +409,26 @@ function buildExercises(
         blanksBySentence.set(blank.sentence_id, current);
     }
 
-    return sentences.map((sentence) =>
-        createClozeExercise({
-            blanks: (blanksBySentence.get(sentence.id) ?? []).map((blank) => ({
-                acceptedAnswers: parseStringArray(blank.accepted_answers),
-                answer: blank.answer,
-                hint: blank.hint,
-                id: blank.id,
-            })),
-            id: sentence.id,
-            sentence: sentence.text,
-            sourcePackageId: sentence.pack_id,
-            tags: parseStringArray(sentence.tags),
-            translation: sentence.translation,
-        }),
-    );
+    return [...sentences]
+        .sort(
+            (first, second) =>
+                getLearningOrderFromTags(first.tags) - getLearningOrderFromTags(second.tags),
+        )
+        .map((sentence) =>
+            createClozeExercise({
+                blanks: (blanksBySentence.get(sentence.id) ?? []).map((blank) => ({
+                    acceptedAnswers: parseStringArray(blank.accepted_answers),
+                    answer: blank.answer,
+                    hint: blank.hint,
+                    id: blank.id,
+                })),
+                id: sentence.id,
+                sentence: sentence.text,
+                sourcePackageId: sentence.pack_id,
+                tags: parseStringArray(sentence.tags),
+                translation: sentence.translation,
+            }),
+        );
 }
 
 function pickActiveExercise(
@@ -546,20 +449,47 @@ function mapContentPacks(rows: readonly ContentPackRow[]): ContentPackView[] {
         isEnabled: fromSqlBool(row.is_enabled),
         licenseName: row.license_name,
         licenseUrl: row.license_url,
+        sentenceCount: row.sentence_count ?? 0,
         source: row.source,
         title: row.title,
     }));
 }
 
 function mapVocabulary(rows: readonly VocabularyRow[]): VocabularyEntryView[] {
-    return rows.map((row) => ({
-        dueCount: row.due_count,
-        id: row.id,
-        meaning: row.meaning,
-        nextReviewAt: row.next_review_at,
-        status: row.status,
-        term: row.term,
-    }));
+    return [...rows]
+        .sort((first, second) => {
+            const orderDelta =
+                getLearningOrderFromTags(first.sentence_tags ?? "[]") -
+                getLearningOrderFromTags(second.sentence_tags ?? "[]");
+
+            if (orderDelta !== 0) {
+                return orderDelta;
+            }
+
+            const blankOrderDelta = (first.blank_order ?? 0) - (second.blank_order ?? 0);
+
+            if (blankOrderDelta !== 0) {
+                return blankOrderDelta;
+            }
+
+            const sentenceIdDelta = (first.sentence_id ?? "").localeCompare(
+                second.sentence_id ?? "",
+            );
+
+            if (sentenceIdDelta !== 0) {
+                return sentenceIdDelta;
+            }
+
+            return first.term.localeCompare(second.term);
+        })
+        .map((row) => ({
+            dueCount: row.due_count,
+            id: row.id,
+            meaning: row.meaning,
+            nextReviewAt: row.next_review_at,
+            status: row.status,
+            term: row.term,
+        }));
 }
 
 function toPracticeAttempts(rows: readonly AttemptRow[]): PracticeAttempt[] {
@@ -613,6 +543,15 @@ function buildState(input: {
     readonly settings: UserSettings;
     readonly vocabulary: readonly VocabularyRow[];
 }): LearningWorkspaceState {
+    const contentPacks = mapContentPacks(input.contentPacks);
+    const activeContentPackId = resolveActiveContentPackIdFromPacks(
+        contentPacks,
+        input.settings.activeContentPackId,
+    );
+    const settings: UserSettings = {
+        ...input.settings,
+        activeContentPackId,
+    };
     const exercises = buildExercises(input.sentences, input.blanks);
     const today = new Date();
     const stats = aggregateLearningStats(toPracticeAttempts(input.attempts), today);
@@ -620,12 +559,13 @@ function buildState(input: {
 
     return {
         activeExercise: pickActiveExercise(exercises, input.attempts),
-        contentPacks: mapContentPacks(input.contentPacks),
+        activeContentPackId,
+        contentPacks,
         correctRate: stats.accuracy,
         dueVocabularyCount: vocabulary.filter((entry) => new Date(entry.nextReviewAt) <= today)
             .length,
         isPersistent: input.isPersistent,
-        settings: input.settings,
+        settings,
         streakDays: stats.currentStreakDays,
         todayAttemptCount: getTodayAttemptCount(input.attempts, today),
         totalAttempts: stats.totalAttempts,
@@ -638,30 +578,88 @@ function buildState(input: {
 
 async function loadFromDatabase(db: Database): Promise<LearningWorkspaceState> {
     await seedDatabase(db);
+    const settingsRows = await db.select<SettingRow[]>("SELECT key, value FROM app_settings");
+    const settings = settingsFromRows(settingsRows);
+    const activeContentPackId = await resolveActiveContentPackId(db, settings.activeContentPackId);
 
-    const [contentPacks, sentences, blanks, vocabulary, attempts, settingsRows] = await Promise.all(
-        [
-            db.select<ContentPackRow[]>("SELECT * FROM content_packs ORDER BY created_at ASC"),
-            db.select<SentenceRow[]>("SELECT * FROM sentences ORDER BY created_at ASC"),
-            db.select<BlankRow[]>(
-                "SELECT * FROM sentence_blanks ORDER BY sentence_id ASC, display_order ASC",
-            ),
-            db.select<VocabularyRow[]>(
-                "SELECT * FROM vocabulary_entries ORDER BY next_review_at ASC, term ASC",
-            ),
-            db.select<AttemptRow[]>(
-                `SELECT practice_attempts.answer,
+    if (activeContentPackId !== settings.activeContentPackId) {
+        await saveSettingsToDatabase(db, {
+            ...settings,
+            activeContentPackId,
+        });
+    }
+
+    const [contentPacks, sentences, blanks, vocabulary, attempts] = await Promise.all([
+        db.select<ContentPackRow[]>(
+            `SELECT content_packs.id,
+                        content_packs.title,
+                        content_packs.description,
+                        content_packs.source,
+                        content_packs.license_name,
+                        content_packs.license_url,
+                        content_packs.is_enabled,
+                        COUNT(sentences.id) AS sentence_count
+                   FROM content_packs
+                   LEFT JOIN sentences ON sentences.pack_id = content_packs.id
+                  GROUP BY content_packs.id,
+                           content_packs.title,
+                           content_packs.description,
+                           content_packs.source,
+                           content_packs.license_name,
+                           content_packs.license_url,
+                           content_packs.is_enabled,
+                           content_packs.created_at
+                  ORDER BY content_packs.created_at ASC`,
+        ),
+        db.select<SentenceRow[]>(
+            "SELECT * FROM sentences WHERE pack_id = $1 ORDER BY created_at ASC",
+            [activeContentPackId],
+        ),
+        db.select<BlankRow[]>(
+            `SELECT sentence_blanks.id,
+                        sentence_blanks.sentence_id,
+                        sentence_blanks.answer,
+                        sentence_blanks.accepted_answers,
+                        sentence_blanks.hint
+                   FROM sentence_blanks
+                   JOIN sentences ON sentences.id = sentence_blanks.sentence_id
+                  WHERE sentences.pack_id = $1
+                  ORDER BY sentence_blanks.sentence_id ASC, sentence_blanks.display_order ASC`,
+            [activeContentPackId],
+        ),
+        db.select<VocabularyRow[]>(
+            `SELECT sentence_blanks.display_order AS blank_order,
+                        COALESCE(vocabulary_entries.id, 'vocab-' || sentence_blanks.id) AS id,
+                        sentence_blanks.answer AS term,
+                        COALESCE(vocabulary_entries.meaning, sentence_blanks.hint) AS meaning,
+                        COALESCE(vocabulary_entries.status, 'learning') AS status,
+                        COALESCE(vocabulary_entries.next_review_at, CURRENT_TIMESTAMP) AS next_review_at,
+                        COALESCE(vocabulary_entries.due_count, 0) AS due_count,
+                        sentences.pack_id AS pack_id,
+                        sentences.id AS sentence_id,
+                        sentences.tags AS sentence_tags
+                   FROM sentence_blanks
+                   JOIN sentences ON sentences.id = sentence_blanks.sentence_id
+                   LEFT JOIN vocabulary_entries ON vocabulary_entries.term = sentence_blanks.answer
+                  WHERE sentences.pack_id = $1
+                  ORDER BY sentences.created_at ASC,
+                           sentence_blanks.display_order ASC`,
+            [activeContentPackId],
+        ),
+        db.select<AttemptRow[]>(
+            `SELECT practice_attempts.answer,
                         sentence_blanks.answer AS blank_answer,
                         practice_attempts.created_at,
                         practice_attempts.is_correct,
                         practice_attempts.sentence_id
                    FROM practice_attempts
+                   JOIN sentences ON sentences.id = practice_attempts.sentence_id
                    JOIN sentence_blanks ON sentence_blanks.id = practice_attempts.blank_id
+                  WHERE sentences.pack_id = $1
                   ORDER BY practice_attempts.created_at ASC`,
-            ),
-            db.select<SettingRow[]>("SELECT key, value FROM app_settings"),
-        ],
-    );
+            [activeContentPackId],
+        ),
+    ]);
 
     return buildState({
         attempts,
@@ -669,9 +667,31 @@ async function loadFromDatabase(db: Database): Promise<LearningWorkspaceState> {
         contentPacks,
         isPersistent: true,
         sentences,
-        settings: settingsFromRows(settingsRows),
+        settings: {
+            ...settings,
+            activeContentPackId,
+        },
         vocabulary,
     });
+}
+
+async function resolveActiveContentPackId(db: Database, preferredPackId: string): Promise<string> {
+    if (preferredPackId.length > 0) {
+        const preferredRows = await db.select<CountRow[]>(
+            "SELECT COUNT(*) AS count FROM content_packs WHERE id = $1 AND is_enabled = 1",
+            [preferredPackId],
+        );
+
+        if ((preferredRows[0]?.count ?? 0) > 0) {
+            return preferredPackId;
+        }
+    }
+
+    const rows = await db.select<Array<Pick<ContentPackRow, "id">>>(
+        "SELECT id FROM content_packs WHERE is_enabled = 1 ORDER BY created_at ASC LIMIT 1",
+    );
+
+    return rows[0]?.id ?? "";
 }
 
 async function createLearningBackup(db: Database): Promise<LearningBackupV1> {
@@ -876,26 +896,28 @@ function getMemoryRows(): {
     readonly sentences: readonly SentenceRow[];
     readonly vocabulary: readonly VocabularyRow[];
 } {
-    const manifest = starterContentPackage.manifest;
-    const contentPacks: ContentPackRow[] = [
-        {
+    const contentPacks: ContentPackRow[] = builtInContentPackages.map((contentPackage) => {
+        const manifest = contentPackage.manifest;
+
+        return {
             description: manifest.description ?? "",
             id: manifest.id,
             is_enabled: 1,
             license_name: manifest.license?.name ?? "未声明",
             license_url: manifest.license?.url ?? "",
+            sentence_count: contentPackage.sentences.length,
             source: manifest.authors.join(", "),
             title: manifest.name,
-        },
-    ];
-    const sentences: SentenceRow[] = starterExerciseInputs.map((exercise) => ({
+        };
+    });
+    const sentences: SentenceRow[] = builtInExerciseInputs.map((exercise) => ({
         id: exercise.id,
         pack_id: exercise.sourcePackageId,
         tags: JSON.stringify(exercise.tags),
         text: exercise.sentence,
         translation: exercise.translation,
     }));
-    const blanks: BlankRow[] = starterExerciseInputs.flatMap((exercise) =>
+    const blanks: BlankRow[] = builtInExerciseInputs.flatMap((exercise) =>
         exercise.blanks.map((blank) => ({
             accepted_answers: JSON.stringify(blank.acceptedAnswers ?? []),
             answer: blank.answer,
@@ -905,12 +927,15 @@ function getMemoryRows(): {
         })),
     );
     const vocabulary: VocabularyRow[] = blanks.map((blank) => ({
+        blank_order: 0,
         due_count: memoryAttempts.filter(
             (attempt) => attempt.blank_answer === blank.answer && attempt.is_correct === 0,
         ).length,
         id: `vocab-${blank.id}`,
         meaning: blank.hint,
         next_review_at: new Date().toISOString(),
+        sentence_id: blank.sentence_id,
+        sentence_tags: sentences.find((sentence) => sentence.id === blank.sentence_id)?.tags,
         status: "learning",
         term: blank.answer,
     }));
@@ -920,15 +945,29 @@ function getMemoryRows(): {
 
 function loadFromMemory(): LearningWorkspaceState {
     const rows = getMemoryRows();
+    const preferredPackId = memorySettings.activeContentPackId;
+    const activeContentPackId =
+        rows.contentPacks.find((pack) => pack.id === preferredPackId)?.id ??
+        rows.contentPacks[0]?.id ??
+        "";
+    const sentences = rows.sentences.filter((sentence) => sentence.pack_id === activeContentPackId);
+    const sentenceIds = new Set(sentences.map((sentence) => sentence.id));
+    const blanks = rows.blanks.filter((blank) => sentenceIds.has(blank.sentence_id));
+    const blankIds = new Set(blanks.map((blank) => blank.id));
+    const vocabulary = rows.vocabulary.filter((entry) => blankIds.has(entry.id.slice(6)));
+    const attempts = memoryAttempts.filter((attempt) => sentenceIds.has(attempt.sentence_id));
 
     return buildState({
-        attempts: memoryAttempts,
-        blanks: rows.blanks,
+        attempts,
+        blanks,
         contentPacks: rows.contentPacks,
         isPersistent: false,
-        sentences: rows.sentences,
-        settings: memorySettings,
-        vocabulary: rows.vocabulary,
+        sentences,
+        settings: {
+            ...memorySettings,
+            activeContentPackId,
+        },
+        vocabulary,
     });
 }
 
@@ -948,7 +987,7 @@ async function updateWrongAnswerQueue(
     expectedAnswer: string,
     hint: string,
 ): Promise<void> {
-    const vocabularyId = `vocab-${blankId}`;
+    const fallbackVocabularyId = `vocab-${blankId}`;
     const now = new Date().toISOString();
 
     await db.execute(
@@ -960,8 +999,14 @@ async function updateWrongAnswerQueue(
             next_review_at = excluded.next_review_at,
             due_count = due_count + 1,
             updated_at = CURRENT_TIMESTAMP`,
-        [vocabularyId, expectedAnswer, hint, "en", "needs_review", now],
+        [fallbackVocabularyId, expectedAnswer, hint, "en", "needs_review", now],
     );
+
+    const vocabularyRows = await db.select<Array<Pick<VocabularyRow, "id">>>(
+        "SELECT id FROM vocabulary_entries WHERE term = $1 LIMIT 1",
+        [expectedAnswer],
+    );
+    const vocabularyId = vocabularyRows[0]?.id ?? fallbackVocabularyId;
 
     await db.execute(
         `INSERT INTO review_queue
@@ -1054,6 +1099,45 @@ export async function saveUserSettings(settings: UserSettings): Promise<Learning
     await saveSettingsToDatabase(db, sanitizedSettings);
 
     return loadFromDatabase(db);
+}
+
+export async function selectContentPack(contentPackId: string): Promise<SelectContentPackResult> {
+    const db = await getDatabase();
+
+    if (db === null) {
+        memorySettings = {
+            ...memorySettings,
+            activeContentPackId: contentPackId,
+        };
+
+        return {
+            activeContentPackId: contentPackId,
+            state: loadFromMemory(),
+        };
+    }
+
+    const packRows = await db.select<CountRow[]>(
+        "SELECT COUNT(*) AS count FROM content_packs WHERE id = $1 AND is_enabled = 1",
+        [contentPackId],
+    );
+
+    if ((packRows[0]?.count ?? 0) === 0) {
+        throw new Error("找不到要学习的词本。");
+    }
+
+    const settingsRows = await db.select<SettingRow[]>("SELECT key, value FROM app_settings");
+    const settings = settingsFromRows(settingsRows);
+    const nextSettings: UserSettings = {
+        ...settings,
+        activeContentPackId: contentPackId,
+    };
+
+    await saveSettingsToDatabase(db, nextSettings);
+
+    return {
+        activeContentPackId: contentPackId,
+        state: await loadFromDatabase(db),
+    };
 }
 
 /**
@@ -1174,12 +1258,10 @@ export async function importContentPackageFile(): Promise<ContentImportResult | 
                   targetLanguage: "zh-CN",
               })
             : parseContentPackageJson(fileContent);
-    const exercises = createExerciseInputsFromPackage(contentPackage);
-
-    await insertContentPackage(db, contentPackage, exercises);
+    const importedSentenceCount = await upsertContentPackage(contentPackage);
 
     return {
-        importedSentenceCount: exercises.length,
+        importedSentenceCount,
         packageName: contentPackage.manifest.name,
         state: await loadFromDatabase(db),
     };
