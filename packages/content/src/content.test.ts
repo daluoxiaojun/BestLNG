@@ -1,3 +1,5 @@
+import { readdirSync, readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -98,5 +100,37 @@ describe("内容包导入", () => {
 
         expect(contentPackage.manifest.id).toBe(sampleContentPackage.manifest.id);
         expect(contentPackage.sentences.length).toBeGreaterThan(0);
+    });
+
+    it("生成的考试内容包均可导入", () => {
+        const packDirectoryUrl = new URL("../packs/exam/", import.meta.url);
+        const packFileNames = readdirSync(packDirectoryUrl).filter((fileName) =>
+            fileName.endsWith(".json"),
+        );
+
+        expect(packFileNames).toEqual([
+            "bestlng-cet4-en-zh.json",
+            "bestlng-cet6-en-zh.json",
+            "bestlng-ielts-en-zh.json",
+            "bestlng-toefl-en-zh.json",
+        ]);
+
+        for (const packFileName of packFileNames) {
+            const contentPackage = parseContentPackageJson(
+                readFileSync(new URL(packFileName, packDirectoryUrl), "utf-8"),
+            );
+            const firstWords = contentPackage.sentences
+                .slice(0, 50)
+                .map((sentence) => sentence.blanks[0]?.answer.toLowerCase() ?? "");
+            const alphabeticFirstWords = [...firstWords].sort((first, second) =>
+                first.localeCompare(second),
+            );
+
+            expect(contentPackage.sentences.length).toBeGreaterThan(1000);
+            expect(contentPackage.manifest.license?.attribution).toContain("ECDICT");
+            expect(validateContentPackage(contentPackage).isValid).toBe(true);
+            expect(contentPackage.sentences[0]?.tags).toContain("order:00001");
+            expect(firstWords).not.toEqual(alphabeticFirstWords);
+        }
     });
 });
