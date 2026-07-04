@@ -36,3 +36,9 @@ BestLNG 是一个开源、本地优先的语言学习项目，第一阶段目标
 - 包管理：pnpm workspace。
 - 发布页：Astro 或 Vite 静态站点。
 - 版本更新：GitHub Releases + Tauri updater。
+
+## 许可证
+
+本项目代码使用 [MIT](./LICENSE) 许可证开源。
+
+内置考试词包等内容数据的来源与许可证说明见 `packages/content/packs/exam/README.md`。
