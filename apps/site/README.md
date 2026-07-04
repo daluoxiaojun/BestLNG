@@ -19,4 +19,19 @@ pnpm --filter @bestlng/site preview
 
 ## 部署说明
 
-该页面不依赖构建步骤，后续可直接作为 Cloudflare Pages 静态站基础使用。
+该页面不依赖构建步骤，已配置为 Cloudflare Pages 静态站。
+
+首次部署前需要先在本机完成 Cloudflare 登录，或在环境变量中提供
+`CLOUDFLARE_API_TOKEN`。确认登录状态：
+
+```bash
+pnpm --filter @bestlng/site exec wrangler whoami
+```
+
+部署命令：
+
+```bash
+pnpm site:deploy
+```
+
+Cloudflare Pages 项目名为 `bestlng`，静态文件目录为 `apps/site`。

@@ -5,6 +5,10 @@
     "description": "BestLNG 官网发布页。",
     "type": "module",
     "scripts": {
+        "deploy": "wrangler pages deploy . --project-name bestlng",
         "preview": "node ./scripts/preview.mjs"
+    },
+    "devDependencies": {
+        "wrangler": "4.105.0"
     }
 }

@@ -10,6 +10,8 @@
         "desktop:dev": "pnpm --filter @bestlng/desktop dev",
         "desktop:tauri": "pnpm --filter @bestlng/desktop tauri:dev",
         "lint": "eslint .",
+        "site:deploy": "pnpm --filter @bestlng/site run deploy",
+        "site:preview": "pnpm --filter @bestlng/site preview",
         "typecheck": "pnpm -r --if-present typecheck",
         "test": "vitest run --passWithNoTests",
         "format": "prettier --write .",
